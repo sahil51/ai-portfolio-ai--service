@@ -1,0 +1,247 @@
+[router]
+system_prompt = """
+You are Daisy, the AI assistant for {portfolio_name}'s portfolio.
+
+Your job is to classify user intent. You have two tools available:
+
+1. `answer_query` — Use this when the user is asking a question about {portfolio_name}'s skills, experience, projects, education, blog, contact info, resume, or anything related to the portfolio.
+
+2. `schedule_meeting` — Use this when the user wants to schedule a meeting, book a call, set up an interview, request a discussion, or arrange any kind of appointment. This includes phrases like "schedule a meeting", "book a call", "want to talk", "discuss a project", "interview", "meet up", etc.
+
+If the user is just greeting, thanking, or making casual conversation, use `answer_query` without extracting any meeting data.
+
+Respond with the appropriate tool call. Extract any meeting-related fields you can from the message.
+"""
+
+[answer.system_prompt]
+template = """
+You are Daisy, a friendly, professional, and knowledgeable AI assistant for {portfolio_name}'s portfolio website.
+
+Your personality:
+- You are warm, helpful, and enthusiastic.
+- You know everything about {portfolio_name}'s professional background, skills, projects, blog articles, and resume.
+- You act like a real, competent human assistant.
+
+Rules:
+1. Respond in the user's preferred language: {language}
+2. Answer ONLY based on the context provided below. Don't make up information or guess.
+3. For resume or CV requests: If a "Resume PDF Direct Download Link" or resume link is available in context, ALWAYS provide a direct clickable markdown link so the user can download or view Sahil's resume PDF directly. Example: You can download Sahil's resume directly here: [Download Sahil's Resume (PDF)](/media/resumes/filename.pdf).
+4. When mentioning or listing any Blog Articles or Case Studies, ALWAYS format them as clickable Markdown links using their exact title and URL from context: [Blog Title](/blog/slug/).
+5. For contact info: Share the contact details from context.
+6. Keep responses clear, helpful, well-structured, and easy to read.
+7. Use plain dashes (-) for bullet lists.
+8. If someone asks about hiring, collaboration, or projects: Be encouraging and provide relevant info from context.
+9. IMPORTANT: When asked about "resume", "blogs", "projects", or "skills": Always include direct clickable markdown links [Title](/url/) from the context.
+
+Context:
+{context}
+"""
+
+[answer.suggestions]
+english = [
+    "Who is {name}?",
+    "What projects has {name} built?",
+    "What are {name}'s skills?",
+    "Can I see {name}'s resume?",
+    "How can I contact {name}?",
+    "I want to schedule an interview",
+]
+hindi = [
+    "{name} kaun hain?",
+    "{name} ne kaun se projects banaye hain?",
+    "{name} ki kya skills hain?",
+    "Kya main {name} ka resume dekh sakta hoon?",
+    "{name} se kaise contact karun?",
+    "Main interview schedule karna chahta hoon",
+]
+
+[meeting.start.english]
+template = "Sure! I can help you schedule an interview with {portfolio_name}. Let's collect a few details first:\n\n{first_question}"
+
+[meeting.start.hindi]
+template = "Zaroor! Main {portfolio_name} ke saath interview schedule karne mein aapki madad kar sakti hoon. Pehle aapki details se shuru karte hain:\n\n{first_question}"
+
+[meeting.fields.english]
+name = "What is your full name?"
+company_name = "What is your company name?"
+company_address = "What is your company address?"
+email = "What is your real and exact email address? (Your interview confirmation and notification details will be sent to this email)."
+contact_number = "What is your exact contact phone number? (We will send interview notifications and call details to this number)."
+meeting_purpose = "What is the purpose of this interview?"
+meeting_date_time = "What is your preferred interview date and time? (e.g., 20 July 2026, 3PM IST)"
+connection_type = "Do you prefer an online interview (Google Meet) or a direct phone call?"
+
+[meeting.fields.hindi]
+name = "Aapka poora naam kya hai?"
+company_name = "Aapki company ka naam kya hai?"
+company_address = "Company ka address kya hai?"
+email = "Aapki real aur exact email ID kya hai? (Kripya sahi email dein kyunki interview ki notification aur confirmation details isi email par jayengi)."
+contact_number = "Aapka exact aur sahi phone number kya hai? (Isi number par interview notification aur call details aayengi)."
+meeting_purpose = "Is interview ka kya purpose hai?"
+meeting_date_time = "Interview ki preferred date aur time kya hai? (e.g., 20 July 2026, 3PM IST)"
+connection_type = "Aap online interview (Google Meet) chahte hain ya direct phone call?"
+
+[meeting.labels.english]
+name = "Name"
+company_name = "Company"
+company_address = "Address"
+email = "Email"
+contact_number = "Phone"
+meeting_purpose = "Purpose"
+meeting_date_time = "Time"
+connection_type = "Type"
+
+[meeting.labels.hindi]
+name = "Naam"
+company_name = "Company"
+company_address = "Address"
+email = "Email"
+contact_number = "Phone"
+meeting_purpose = "Purpose"
+meeting_date_time = "Time"
+connection_type = "Type"
+
+[meeting.collected_prefix.english]
+text = "I've noted these details so far:"
+
+[meeting.collected_prefix.hindi]
+text = "Maine abhi tak ye details note ki hain:"
+
+[meeting.confirmation.online_with_link.english]
+template = """
+Your interview has been scheduled successfully!
+
+Date/Time: {meeting_date_time}
+Google Meet Link: {meet_link}
+
+You can ask 'what is my interview link' anytime.
+"""
+
+[meeting.confirmation.online_with_link.hindi]
+template = """
+Aapka interview schedule ho gaya hai!
+
+Date/Time: {meeting_date_time}
+Google Meet Link: {meet_link}
+
+Kabhi bhi puchh sakte hain 'interview link kya hai'.
+"""
+
+[meeting.confirmation.online_no_link.english]
+template = """
+Your interview request has been successfully scheduled!
+
+Date/Time: {meeting_date_time}
+Google Meet Link: {meet_link}
+
+{portfolio_name} has received your interview request and saved this Google Meet link with your session.
+"""
+
+[meeting.confirmation.online_no_link.hindi]
+template = """
+Aapka interview successfully schedule ho gaya hai!
+
+Date/Time: {meeting_date_time}
+Google Meet Link: {meet_link}
+
+{portfolio_name} ko aapki interview request mil gayi hai aur yeh Google Meet link aapke session ke sath save ho gaya hai.
+"""
+
+[meeting.confirmation.offline.english]
+template = """
+Your phone call interview has been scheduled!
+
+Date/Time: {meeting_date_time}
+Contact Number: {portfolio_phone}
+
+{portfolio_name} will call you on your provided phone number at the scheduled time. You can also reach {portfolio_name} directly at {portfolio_phone}.
+"""
+
+[meeting.confirmation.offline.hindi]
+template = """
+Aapki phone call interview schedule ho gayi hai!
+
+Date/Time: {meeting_date_time}
+Contact Number: {portfolio_phone}
+
+{portfolio_name} aapko scheduled time par aapke contact number par call karenge. Aap seedhe {portfolio_name} se {portfolio_phone} par bhi contact kar sakte hain.
+"""
+
+[greeting.english]
+template = "Hello! I'm Daisy, {portfolio_name}'s AI assistant. How can I help you today?"
+
+[greeting.hindi]
+template = "Namaste! Main Daisy hoon, {portfolio_name} ki AI assistant. Main aapki kaise madad kar sakti hoon?"
+
+[fallback.english]
+no_info = "I don't have that information available. You can check the portfolio or try asking something else."
+contact = "You can contact {portfolio_name} directly through the contact section on the portfolio website."
+resume = "You can download {portfolio_name}'s resume from the portfolio website. Look for the 'Download CV' button."
+
+[fallback.hindi]
+no_info = "Mere paas yeh jaankari nahi hai. Aap portfolio dekhein ya kuch aur puchhein."
+contact = "Aap {portfolio_name} se portfolio website ke contact section ke through directly baat kar sakte hain."
+resume = "Aap {portfolio_name} ka resume portfolio website se download kar sakte hain. 'Download CV' button dekhein."
+
+# ── Meeting Confirmation ────────────────────────────────────────────────────
+
+[meeting.confirmation_summary.english]
+template = """
+Here's a summary of your interview details:
+
+Name: {name}
+Company: {company_name}
+Address: {company_address}
+Email: {email}
+Phone: {contact_number}
+Purpose: {meeting_purpose}
+Date/Time: {meeting_date_time}
+Type: {connection_type}
+
+Please confirm these details. Type "confirm" to schedule, "edit" to change any detail, or "cancel" to exit.
+"""
+
+[meeting.confirmation_summary.hindi]
+template = """
+Aapki interview ki details ka summary yeh hai:
+
+Naam: {name}
+Company: {company_name}
+Address: {company_address}
+Email: {email}
+Phone: {contact_number}
+Purpose: {meeting_purpose}
+Date/Time: {meeting_date_time}
+Type: {connection_type}
+
+Kripya in details ko confirm karein. "Confirm" type karein schedule karne ke liye, "edit" kisi detail ko change karne ke liye, ya "cancel" exit karne ke liye.
+"""
+
+# ── Validation Errors ────────────────────────────────────────────────────────
+
+[meeting.validation.english]
+invalid_email = "That doesn't look like a valid email address. Please enter a valid email (e.g., name@company.com)."
+invalid_phone = "That doesn't look like a valid phone number. Please enter a valid contact number (e.g., +91 9876543210)."
+invalid_connection_type = "Please specify either 'online' (for Google Meet) or 'offline' (for in-person interview)."
+
+[meeting.validation.hindi]
+invalid_email = "Yeh valid email address nahi lagta. Kripya sahi email enter karein (e.g., name@company.com)."
+invalid_phone = "Yeh valid phone number nahi lagta. Kripya sahi contact number enter karein (e.g., +91 9876543210)."
+invalid_connection_type = "Kripya 'online' (Google Meet ke liye) ya 'offline' (in-person meeting ke liye) mein se ek chunein."
+
+# ── Cancel / Exit Messages ───────────────────────────────────────────────────
+
+[meeting.cancel.english]
+template = "No problem! I've cancelled the interview request. Feel free to ask me anything else or schedule an interview later."
+
+[meeting.cancel.hindi]
+template = "Koi baat nahi! Maine interview request cancel kar di hai. Aap mujhse kuch bhi puchh sakte hain ya baad mein interview schedule kar sakte hain."
+
+# ── Edit Prompt ──────────────────────────────────────────────────────────────
+
+[meeting.edit_prompt.english]
+template = "Which detail would you like to change? You can say the field name (name, company, address, email, phone, purpose, date/time, or meeting type)."
+
+[meeting.edit_prompt.hindi]
+template = "Kaun si detail change karna chahte hain? Aap field ka naam bol sakte hain (naam, company, address, email, phone, purpose, date/time, ya meeting type)."
+
