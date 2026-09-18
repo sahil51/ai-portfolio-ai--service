@@ -1,0 +1,56 @@
+# Environment variables & secrets (CRITICAL: Never commit API keys or passwords)
+.env
+.env.*
+*.env
+!.env.example
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+myvenv/
+
+# Distribution & Build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing, typing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE & Code Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & SQLite databases
+*.log
+logs/
+*.sqlite3
+*.db
+
+# Temporary & backup files
+*.tmp
+*.bak
