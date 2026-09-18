@@ -30,7 +30,7 @@ class Settings:
 
     # LLM Fallback (Gemini)
     GEMINI_API_KEY: str = os.getenv('GEMINI_API_KEY', '')
-    GEMINI_MODEL: str = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+    GEMINI_MODEL: str = os.getenv('GEMINI_MODEL', 'gemini-3-flash-preview')
 
     # LLM Tertiary (NVIDIA)
     NVIDIA_API_KEY: str = os.getenv('NVIDIA_API_KEY', '')
