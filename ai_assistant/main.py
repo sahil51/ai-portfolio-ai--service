@@ -47,6 +47,12 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(reindex_router, prefix="/api")
 
 
+@app.get("/")
+@app.head("/")
+async def root():
+    return {"status": "ok", "service": "daisy-ai-assistant", "version": "1.0.0"}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "daisy-ai-assistant"}
