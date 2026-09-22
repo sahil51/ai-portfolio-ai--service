@@ -118,15 +118,27 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
+_hero_cache: dict | None = None
+_hero_cache_time: float = 0.0
+
+
 async def _get_hero(db: AsyncSession) -> dict:
+    global _hero_cache, _hero_cache_time
+    now = time.time()
+    if _hero_cache is not None and (now - _hero_cache_time) < 300:  # Cache for 5 minutes
+        return _hero_cache
     try:
         r = await db.execute(select(HeroInfo).limit(1))
         h = r.scalar_one_or_none()
         if h:
-            return {"name": h.name or "", "location": h.location or "", "phone": h.phone or ""}
+            _hero_cache = {"name": h.name or "Sahil Thakur", "location": h.location or "", "phone": h.phone or ""}
+            _hero_cache_time = now
+            return _hero_cache
     except Exception:
         pass
-    return {"name": "", "location": "", "phone": ""}
+    if _hero_cache is not None:
+        return _hero_cache
+    return {"name": "Sahil Thakur", "location": "", "phone": ""}
 
 
 async def _finalize_meeting(
@@ -417,6 +429,11 @@ async def _handle_meeting(
         message=resp, session_id=sid, intent="meeting",
         language=lang, meeting_progress=progress,
     )
+
+
+@router.options("/chat")
+async def chat_options():
+    return {"status": "ok"}
 
 
 @router.post("/chat", response_model=ChatResponse)

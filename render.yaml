@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-portfolio-ai-service
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn ai_assistant.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: CHAT_API_PORT
+        value: 8001
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: INTERNAL_API_KEY
+        value: d59e355c3c0a2b0b14467d55ed59e211e40562e8484196144e54823293883bfd
+      - key: N8N_MEETING_WEBHOOK_URL
+        value: https://automation.crescaler.com/webhook/c305e70f-4241-4981-8a58-97cc61e7b6df

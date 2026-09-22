@@ -1,8 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models import (
-    HeroInfo, Experience, Project, Education, SkillCategory,
-    BlogPost, ContactMethod
+    HeroInfo, Experience, Project, AutomationWorkflow, WorkflowImage,
+    Education, SkillCategory, BlogPost, ContactMethod
 )
 
 
@@ -124,6 +124,35 @@ async def load_all_documents(session: AsyncSession) -> list[dict]:
             "content": "\n".join(parts),
             "keywords": f"{proj.title} project {proj.technologies} case study detailed blog breakdown",
             "source": "project",
+        })
+
+    # Automation & n8n Workflows
+    wf_result = await session.execute(
+        select(AutomationWorkflow).order_by(AutomationWorkflow.order, AutomationWorkflow.id)
+    )
+    workflows = wf_result.scalars().all()
+    for wf in workflows:
+        parts = [
+            f"Automation Workflow: {wf.title}",
+            f"Category: {wf.category}",
+            f"Description: {wf.description}",
+        ]
+        if wf.technologies:
+            parts.append(f"Technologies / Tools: {wf.technologies}")
+        if wf.link:
+            parts.append(f"Workflow Link / Demo: {wf.link}")
+        if wf.images:
+            img_captions = [img.caption for img in wf.images if img.caption]
+            if img_captions:
+                parts.append(f"Key Workflow Steps: {'; '.join(img_captions)}")
+
+        docs.append({
+            "id": f"workflow_{wf.id}",
+            "type": "workflow",
+            "title": f"Automation Workflow: {wf.title}",
+            "content": "\n".join(parts),
+            "keywords": f"{wf.title} {wf.category} {wf.technologies} n8n automation workflow automated lead webhook ai agent",
+            "source": "automation_workflow",
         })
 
     # Education

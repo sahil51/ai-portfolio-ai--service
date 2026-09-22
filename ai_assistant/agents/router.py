@@ -27,7 +27,7 @@ QUERY_TOOL = {
     "type": "function",
     "function": {
         "name": "answer_query",
-        "description": "Answer questions about the portfolio owner's background, skills, experience, projects, etc.",
+        "description": "Answer questions about the portfolio owner's background, skills, experience, projects, n8n automations, workflows, blog, contact, etc.",
         "parameters": {
             "type": "object",
             "properties": {

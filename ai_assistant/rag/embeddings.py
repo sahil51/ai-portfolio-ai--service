@@ -5,28 +5,35 @@ from config import settings
 
 class EmbeddingClient:
     def __init__(self):
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.model_name = f'models/{settings.EMBEDDING_MODEL}'
         self._lock = asyncio.Lock()
 
     async def embed_text(self, text: str) -> list[float]:
-        loop = asyncio.get_event_loop()
-        max_retries = 3
-        for attempt in range(max_retries):
+        from agents.llm_client import key_manager, _is_quota_error
+        ordered_keys = key_manager.get_ordered_keys()
+        if not ordered_keys:
+            ordered_keys = [settings.GEMINI_API_KEY] if settings.GEMINI_API_KEY else []
+
+        last_error = None
+        for api_key in ordered_keys:
+            client = key_manager.get_client(api_key)
             try:
                 async with self._lock:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self.client.models.embed_content(
-                            model=self.model_name,
-                            contents=text,
-                        )
+                    result = await asyncio.to_thread(
+                        client.models.embed_content,
+                        model=self.model_name,
+                        contents=text,
                     )
                 return result.embeddings[0].values
             except Exception as e:
-                if attempt == max_retries - 1:
-                    raise e
-                await asyncio.sleep(1.0 * (attempt + 1))
+                last_error = e
+                if _is_quota_error(e):
+                    key_manager.mark_exhausted(api_key, cooldown_seconds=60.0)
+                    continue
+                else:
+                    continue
+
+        raise last_error or RuntimeError("Embedding generation failed across all keys.")
 
     async def embed_query(self, query: str) -> list[float]:
         return await self.embed_text(query)

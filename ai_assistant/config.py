@@ -23,23 +23,33 @@ class Settings:
     def DATABASE_URL_SYNC(self) -> str:
         return f'postgresql://{self.DB_USER}:{quote_plus(self.DB_PASSWORD)}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?sslmode=require'
 
-    # LLM Primary (Cerebras)
-    CEREBRAS_API_KEY: str = os.getenv('CEREBRAS_API_KEY', '')
-    CEREBRAS_MODEL: str = os.getenv('CEREBRAS_MODEL', 'gpt-oss-120b')
-    CEREBRAS_CHAT_URL: str = os.getenv('CEREBRAS_CHAT_URL', 'https://api.cerebras.ai/v1/chat/completions')
+    # LLM & Embeddings (Gemini Only)
+    @property
+    def GEMINI_API_KEY(self) -> str:
+        return os.getenv('GEMINI_API_KEY', '')
 
-    # LLM Fallback (Gemini)
-    GEMINI_API_KEY: str = os.getenv('GEMINI_API_KEY', '')
-    GEMINI_MODEL: str = os.getenv('GEMINI_MODEL', 'gemini-3-flash-preview')
+    @property
+    def GEMINI_API_KEYS(self) -> str:
+        return os.getenv('GEMINI_API_KEYS', '')
 
-    # LLM Tertiary (NVIDIA)
-    NVIDIA_API_KEY: str = os.getenv('NVIDIA_API_KEY', '')
-    NVIDIA_MODEL: str = os.getenv('NVIDIA_MODEL', 'mistralai/mistral-nemotron')
-    NVIDIA_CHAT_URL: str = os.getenv('NVIDIA_CHAT_URL', 'https://integrate.api.nvidia.com/v1/chat/completions')
-    NVIDIA_BACKUP_MODELS: str = os.getenv('NVIDIA_BACKUP_MODELS', '')
+    @property
+    def GEMINI_MODEL(self) -> str:
+        return os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 
-    # Embeddings (Gemini)
-    EMBEDDING_MODEL: str = os.getenv('EMBEDDING_MODEL', 'gemini-embedding-001')
+    @property
+    def EMBEDDING_MODEL(self) -> str:
+        return os.getenv('EMBEDDING_MODEL', 'gemini-embedding-001')
+
+    @property
+    def GEMINI_KEYS_LIST(self) -> list[str]:
+        """Returns ordered list of Gemini API keys configured via GEMINI_API_KEYS or GEMINI_API_KEY."""
+        combined = f"{self.GEMINI_API_KEYS},{self.GEMINI_API_KEY}"
+        keys = []
+        for k in combined.split(','):
+            k = k.strip()
+            if k and k not in keys:
+                keys.append(k)
+        return keys
 
     # n8n
     N8N_MEETING_WEBHOOK_URL: str = os.getenv('N8N_MEETING_WEBHOOK_URL', '')
@@ -52,7 +62,7 @@ class Settings:
 
     # Assistant config
     MAX_HISTORY_MESSAGES: int = 100
-    CHAT_API_PORT: int = int(os.getenv('CHAT_API_PORT', '8001'))
+    CHAT_API_PORT: int = int(os.getenv('PORT', os.getenv('CHAT_API_PORT', '8001')))
 
     # Security Config (Loaded dynamically from .env)
     INTERNAL_API_KEY: str = os.getenv('INTERNAL_API_KEY', '')

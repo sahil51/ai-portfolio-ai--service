@@ -10,6 +10,7 @@ CATEGORY_KEYWORDS = {
     "experience": ["experience", "work", "job", "company", "companies", "worked", "employment", "career", "role", "position"],
     "education": ["education", "study", "studied", "degree", "university", "college", "school", "learn", "academic"],
     "blog": ["blog", "article", "post", "write", "writing", "published"],
+    "workflow": ["workflow", "workflows", "n8n", "automation", "automations", "automate", "automated", "pipeline", "webhook", "lead", "whatsapp", "bot"],
     "contact": ["contact", "email", "phone", "reach", "connect", "hire", "call"],
     "profile": ["about", "who", "introduce", "introduction", "background", "summary", "bio", "profile"],
 }

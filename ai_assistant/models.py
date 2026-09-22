@@ -105,6 +105,38 @@ class Project(Base):
         return [t.strip() for t in (self.technologies or '').split(',') if t.strip()]
 
 
+class AutomationWorkflow(Base):
+    __tablename__ = 'portfolio_automationworkflow'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200))
+    category = Column(String(100))
+    description = Column(Text)
+    technologies = Column(String(255))
+    icon_class = Column(String(100), default='fa-solid fa-gears')
+    link = Column(String(500), nullable=True)
+    order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+
+    images = relationship('WorkflowImage', back_populates='workflow', lazy='selectin')
+
+    def get_technologies_list(self):
+        return [t.strip() for t in (self.technologies or '').split(',') if t.strip()]
+
+
+class WorkflowImage(Base):
+    __tablename__ = 'portfolio_workflowimage'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(Integer, ForeignKey('portfolio_automationworkflow.id'), nullable=False)
+    image = Column(String(500), nullable=True)
+    image_url = Column(String(500), nullable=True)
+    caption = Column(String(255), nullable=True)
+    order = Column(Integer, default=0)
+
+    workflow = relationship('AutomationWorkflow', back_populates='images')
+
+
 class Education(Base):
     __tablename__ = 'portfolio_education'
 
