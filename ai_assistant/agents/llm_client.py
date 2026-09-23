@@ -27,10 +27,13 @@ def _is_transient_error(e: Exception) -> bool:
 
 
 def _get_candidate_models() -> list[str]:
-    """Returns candidate Gemini models starting with configured primary model followed by fast fallbacks."""
+    """Returns candidate Gemini models starting with fast models and verified fallbacks."""
     primary = settings.GEMINI_MODEL.strip()
-    fallbacks = ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.5-flash"]
-    candidates = [primary]
+    # Prioritize gemini-3.6-flash and gemini-3.5-flash-lite for speed and stability
+    fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    candidates = []
+    if primary and primary not in fallbacks:
+        candidates.append(primary)
     for fb in fallbacks:
         if fb not in candidates:
             candidates.append(fb)
@@ -136,6 +139,9 @@ async def call_llm(messages: list[dict], tools: list | None = None) -> tuple[str
 
         if gemini_tools:
             config_args["tools"] = gemini_tools
+            config_args["tool_config"] = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+            )
 
     config = types.GenerateContentConfig(**config_args)
 

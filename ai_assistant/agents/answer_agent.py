@@ -42,11 +42,12 @@ async def generate_answer(
     messages_for_llm.append({"role": "user", "content": query})
 
     try:
-        answer, _ = await call_llm(messages_for_llm)
-        if answer:
-            return answer
-    except Exception:
-        pass
+        import asyncio
+        answer, _ = await asyncio.wait_for(call_llm(messages_for_llm), timeout=25.0)
+        if answer and answer.strip():
+            return answer.strip()
+    except Exception as e:
+        print(f"[generate_answer] LLM call failed or timed out: {e}")
 
     ql = query.lower()
     if "resume" in ql:

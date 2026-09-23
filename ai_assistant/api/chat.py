@@ -435,6 +435,33 @@ async def chat_options():
     return {"status": "ok"}
 
 
+
+def _is_greeting(text: str) -> bool:
+    """Instant detection for greetings and pleasantries (<1ms)."""
+    t = text.lower().strip()
+    t_clean = re.sub(r'[!.,?]+$', '', t).strip()
+    greetings = {
+        "hi", "hello", "hey", "hii", "hiii", "helo", "hlo", "holla",
+        "namaste", "namaskar", "kem cho", "kaise ho", "kaisa hai",
+        "good morning", "good afternoon", "good evening", "good day",
+        "who are you", "what can you do", "intro", "introduce",
+        "start", "menu", "help"
+    }
+    return t_clean in greetings or bool(re.match(r'^(hi+|hello+|hey+)\b', t_clean))
+
+
+def _is_resume_request(text: str) -> bool:
+    """Instant detection for resume / CV requests (<1ms)."""
+    t = text.lower().strip()
+    return any(w in t for w in ["resume", "cv", "curriculum vitae", "biodata"])
+
+
+def _is_contact_request(text: str) -> bool:
+    """Instant detection for contact details (<1ms)."""
+    t = text.lower().strip()
+    return any(w in t for w in ["contact", "email", "phone number", "reach out", "contact details", "contact number"])
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     req: ChatRequest,
@@ -497,6 +524,27 @@ async def chat_endpoint(
     if not msg:
         g = _clean(get_greeting(lang, portfolio_name=pname))
         return ChatResponse(message=g, session_id=sid, intent="greeting", language=lang)
+
+    # ── Instant Fast-Paths for Greetings, Resume, Contact (Zero LLM Overhead) ──
+    if _is_greeting(msg):
+        await store.add_message(sid, "user", msg)
+        g = _clean(get_greeting(lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", g)
+        return ChatResponse(message=g, session_id=sid, intent="greeting", language=lang)
+
+    if _is_resume_request(msg):
+        await store.add_message(sid, "user", msg)
+        from prompts import get_fallback
+        resp = _clean(get_fallback("resume", lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", resp)
+        return ChatResponse(message=resp, session_id=sid, intent="resume_request", language=lang)
+
+    if _is_contact_request(msg):
+        await store.add_message(sid, "user", msg)
+        from prompts import get_fallback
+        resp = _clean(get_fallback("contact", lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", resp)
+        return ChatResponse(message=resp, session_id=sid, intent="contact_request", language=lang)
 
     await store.add_message(sid, "user", msg)
     history = await session_manager.format_history(db, sid)
