@@ -194,8 +194,8 @@ async def _finalize_meeting(
         pending_rec.meeting_date_time = m.meeting_date_time
         pending_rec.connection_type = m.connection_type
         pending_rec.meet_link = link if ok else None
-        pending_rec.status = "confirmed" if ok else "pending"
-        pending_rec.n8n_webhook_status = "success" if ok else "failed"
+        pending_rec.status = "confirmed" if ok else "failed_webhook"
+        pending_rec.n8n_webhook_status = "success" if ok else f"failed: {str(reason)[:35]}"
         await ms.session.commit()
         rec = pending_rec
     else:
@@ -207,12 +207,11 @@ async def _finalize_meeting(
             "meeting_date_time": m.meeting_date_time,
             "connection_type": m.connection_type,
             "meet_link": link if ok else None,
-            "status": "confirmed" if ok else "pending",
-            "n8n_webhook_status": "success" if ok else "failed",
+            "status": "confirmed" if ok else "failed_webhook",
+            "n8n_webhook_status": "success" if ok else f"failed: {str(reason)[:35]}",
         })
     session_manager.set_meeting_result(sid, rec.id, link if ok else None)
-    session_manager.set_pending_intent(sid, "")
-    session_manager.set_confirmation_pending(sid, False)
+    session_manager.clear_meeting(sid)
     if not ok:
         await ms.mark_failed(rec.id)
 

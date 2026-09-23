@@ -646,10 +646,16 @@ async def send_to_n8n(meeting: MeetingData, session_id: str = "") -> tuple[bool,
         "session_id": session_id,
     }
 
-    webhook_url = settings.N8N_MEETING_WEBHOOK_URL
+    webhook_url = str(settings.N8N_MEETING_WEBHOOK_URL or "").strip()
     if not webhook_url:
         print("[n8n Webhook] Error: N8N_MEETING_WEBHOOK_URL is not set.")
         return False, "ERROR", "n8n webhook URL not configured"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+    }
 
     print(f"\n[n8n Webhook] Triggering webhook: {webhook_url}")
     print(f"[n8n Webhook] Payload: {payload}")
@@ -657,8 +663,8 @@ async def send_to_n8n(meeting: MeetingData, session_id: str = "") -> tuple[bool,
     last_error = ""
     for attempt in range(3):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(webhook_url, json=payload)
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(webhook_url, json=payload, headers=headers)
                 print(f"[n8n Webhook] Attempt {attempt + 1} response status: {resp.status_code}")
                 if resp.status_code in (200, 201, 202):
                     try:
@@ -945,9 +951,15 @@ async def send_interview_email_notification(
     # Send to Sahil (NOTIFICATION_EMAIL or EMAIL_HOST_USER)
     admin_recipient = settings.NOTIFICATION_EMAIL.strip() or settings.EMAIL_HOST_USER.strip()
     if admin_recipient:
-        asyncio.create_task(asyncio.to_thread(_send_email_sync, subject_admin, text_admin, html_admin, admin_recipient))
+        try:
+            await asyncio.to_thread(_send_email_sync, subject_admin, text_admin, html_admin, admin_recipient)
+        except Exception as e:
+            print(f"[Meeting Email Admin Error]: {e}")
 
     # Send to Candidate (meeting.email)
     candidate_recipient = (meeting.email or "").strip()
     if candidate_recipient:
-        asyncio.create_task(asyncio.to_thread(_send_email_sync, subject_candidate, text_candidate, html_candidate, candidate_recipient))
+        try:
+            await asyncio.to_thread(_send_email_sync, subject_candidate, text_candidate, html_candidate, candidate_recipient)
+        except Exception as e:
+            print(f"[Meeting Email Candidate Error]: {e}")

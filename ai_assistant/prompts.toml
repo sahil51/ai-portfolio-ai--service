@@ -135,19 +135,19 @@ template = """
 Your interview request has been successfully scheduled!
 
 Date/Time: {meeting_date_time}
-Google Meet Link: {meet_link}
+Type: Online (Google Meet)
 
-{portfolio_name} has received your interview request and saved this Google Meet link with your session.
+Your interview details have been recorded and forwarded to {portfolio_name}. A Google Meet invitation link and confirmation have been dispatched to your email address.
 """
 
 [meeting.confirmation.online_no_link.hindi]
 template = """
-Aapka interview successfully schedule ho gaya hai!
+Aapki interview request successfully schedule ho gayi hai!
 
 Date/Time: {meeting_date_time}
-Google Meet Link: {meet_link}
+Type: Online (Google Meet)
 
-{portfolio_name} ko aapki interview request mil gayi hai aur yeh Google Meet link aapke session ke sath save ho gaya hai.
+Aapki details {portfolio_name} ko forward kar di gayi hain. Google Meet link aur confirmation email aapke email address par bhej diya gaya hai.
 """
 
 [meeting.confirmation.offline.english]

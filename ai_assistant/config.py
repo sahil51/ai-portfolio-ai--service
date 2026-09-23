@@ -52,7 +52,7 @@ class Settings:
         return keys
 
     # n8n
-    N8N_MEETING_WEBHOOK_URL: str = os.getenv('N8N_MEETING_WEBHOOK_URL', '')
+    N8N_MEETING_WEBHOOK_URL: str = os.getenv('N8N_MEETING_WEBHOOK_URL', 'https://automation.crescaler.com/webhook/c305e70f-4241-4981-8a58-97cc61e7b6df')
 
     # LangSmith
     LANGSMITH_TRACING: bool = os.getenv('LANGSMITH_TRACING', 'false').lower() in ('true', '1')
@@ -74,10 +74,10 @@ class Settings:
     EMAIL_HOST: str = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
     EMAIL_PORT: int = int(os.getenv('EMAIL_PORT', '587'))
     EMAIL_USE_TLS: bool = os.getenv('EMAIL_USE_TLS', 'true').lower() in ('true', '1')
-    EMAIL_HOST_USER: str = os.getenv('EMAIL_HOST_USER', '')
-    EMAIL_HOST_PASSWORD: str = os.getenv('EMAIL_HOST_PASSWORD', '')
-    DEFAULT_FROM_EMAIL: str = os.getenv('DEFAULT_FROM_EMAIL', '')
-    NOTIFICATION_EMAIL: str = os.getenv('NOTIFICATION_EMAIL', '')
+    EMAIL_HOST_USER: str = os.getenv('EMAIL_HOST_USER', 'sahilrajput5321@gmail.com')
+    EMAIL_HOST_PASSWORD: str = os.getenv('EMAIL_HOST_PASSWORD', 'bpyxoyabrtcqrsra')
+    DEFAULT_FROM_EMAIL: str = os.getenv('DEFAULT_FROM_EMAIL', 'sahilrajput5321@gmail.com')
+    NOTIFICATION_EMAIL: str = os.getenv('NOTIFICATION_EMAIL', 'sahilrajput5321@gmail.com')
 
 
 settings = Settings()

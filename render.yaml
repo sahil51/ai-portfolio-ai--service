@@ -19,3 +19,17 @@ services:
         value: d59e355c3c0a2b0b14467d55ed59e211e40562e8484196144e54823293883bfd
       - key: N8N_MEETING_WEBHOOK_URL
         value: https://automation.crescaler.com/webhook/c305e70f-4241-4981-8a58-97cc61e7b6df
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "true"
+      - key: EMAIL_HOST_USER
+        value: sahilrajput5321@gmail.com
+      - key: EMAIL_HOST_PASSWORD
+        value: bpyxoyabrtcqrsra
+      - key: DEFAULT_FROM_EMAIL
+        value: sahilrajput5321@gmail.com
+      - key: NOTIFICATION_EMAIL
+        value: sahilrajput5321@gmail.com
