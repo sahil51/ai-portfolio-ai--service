@@ -14,7 +14,8 @@ from agents.router import classify_intent
 from agents.meeting_agent import (
     extract_meeting_fields, send_to_n8n, format_meeting_response,
     resolve_edit_field, get_current_field_index, _build_progress,
-    format_datetime_display, parse_datetime, send_interview_email_notification,
+    format_datetime_display, parse_datetime, validate_meeting_datetime,
+    send_interview_email_notification,
 )
 from agents.answer_agent import generate_answer
 from prompts import (
@@ -34,6 +35,9 @@ _session_message_counts = defaultdict(int)
 
 def check_ip_rate_limit(client_ip: str) -> bool:
     """Returns True if request allowed, False if IP rate limit exceeded (max 10 req/min)."""
+    # Allow localhost / testing without artificial rate limit throttling
+    if client_ip in ("127.0.0.1", "localhost", "::1", "testclient") or client_ip.startswith("127."):
+        return True
     now = time.time()
     cutoff = now - 60.0
     timestamps = [t for t in _ip_request_timestamps[client_ip] if t > cutoff]
@@ -344,6 +348,28 @@ async def _handle_meeting(
         print("--- [handle_meeting] canceling active meeting ---")
         return await _handle_cancel(sid, store, ms, lang)
 
+    # ── P2 Fix: Meeting Escape — answer general FAQ without breaking interview flow ──
+    if user_msg and "?" in user_msg and not session_manager.is_confirmation_pending(sid):
+        intent_check, _ = await classify_intent([{"role": "user", "content": user_msg}], pname)
+        if intent_check == "general_query":
+            general_ans = await generate_answer(
+                query=user_msg, history=history or [],
+                portfolio_name=pname, language=lang,
+            )
+            general_ans = _clean(general_ans)
+            continue_note = (
+                "\n\n---\nAap interview scheduling ke beech mein hain. Continue karne ke liye kuch bhi type karein."
+                if lang == "hindi" else
+                "\n\n---\nYou're in the middle of scheduling an interview. Type anything to continue where you left off."
+            )
+            combined = general_ans + continue_note
+            await store.add_message(sid, "assistant", combined)
+            progress = _build_progress(m, lang)
+            return ChatResponse(
+                message=combined, session_id=sid, intent="meeting_general_escape",
+                language=lang, meeting_progress=progress,
+            )
+
     # Confirm/edit keywords ONLY work when all details are filled
     if session_manager.is_confirmation_pending(sid):
         if _is_confirm(user_msg):
@@ -398,8 +424,17 @@ async def _handle_meeting(
         # User sent a message with new/updated details (e.g. new date/time)
         resp, updated, progress = await extract_meeting_fields(user_msg, m, lang, history, portfolio_name=pname)
         if updated and updated.is_complete() and updated.confirmation_pending:
+            # P1 Fix: Show summary again, wait for explicit "confirm" — do NOT auto-finalize
+            session_manager.set_confirmation_pending(sid, True)
+            session_manager.set_pending_meeting(sid, updated)
             await ms.save_or_update_pending(sid, updated)
-            return await _finalize_meeting(updated, sid, store, ms, hero, lang)
+            resp = _clean(resp)
+            await store.add_message(sid, "assistant", resp)
+            progress = _build_progress(updated, lang)
+            return ChatResponse(
+                message=resp, session_id=sid, intent="meeting_confirmation_pending",
+                language=lang, meeting_progress=progress,
+            )
 
         session_manager.set_pending_intent(sid, "meeting")
         session_manager.set_pending_meeting(sid, updated)
@@ -415,9 +450,17 @@ async def _handle_meeting(
     resp, updated, progress = await extract_meeting_fields(user_msg, m, lang, history, portfolio_name=pname)
 
     if updated and updated.is_complete() and updated.confirmation_pending:
-        # Auto-finalize: all 8 fields collected, save & send to n8n directly
+        # P1 Fix: All 8 fields collected — show summary, wait for explicit "confirm"
+        session_manager.set_confirmation_pending(sid, True)
+        session_manager.set_pending_meeting(sid, updated)
         await ms.save_or_update_pending(sid, updated)
-        return await _finalize_meeting(updated, sid, store, ms, hero, lang)
+        resp = _clean(resp)
+        await store.add_message(sid, "assistant", resp)
+        progress = _build_progress(updated, lang)
+        return ChatResponse(
+            message=resp, session_id=sid, intent="meeting_confirmation_pending",
+            language=lang, meeting_progress=progress,
+        )
 
     session_manager.set_pending_intent(sid, "meeting")
     session_manager.set_pending_meeting(sid, updated)
@@ -459,7 +502,18 @@ def _is_resume_request(text: str) -> bool:
 def _is_contact_request(text: str) -> bool:
     """Instant detection for contact details (<1ms)."""
     t = text.lower().strip()
-    return any(w in t for w in ["contact", "email", "phone number", "reach out", "contact details", "contact number"])
+    # Don't trigger if user is providing an email or scheduling
+    if "@" in t or any(w in t for w in ["schedule", "book", "appoint", "interview", "my email", "meri email", "my phone", "mera number", "i am", "main "]):
+        return False
+    contact_phrases = [
+        "contact details", "contact number", "contact info", "how to contact",
+        "reach out", "phone number", "get in touch", "contact sahil", "sahil's email",
+        "what is your email", "what is your phone", "sahil ka contact", "sahil ka number",
+    ]
+    if any(p in t for p in contact_phrases):
+        return True
+    t_clean = re.sub(r'[!.,?]+$', '', t).strip()
+    return t_clean in {"contact", "email", "phone"}
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -525,34 +579,9 @@ async def chat_endpoint(
         g = _clean(get_greeting(lang, portfolio_name=pname))
         return ChatResponse(message=g, session_id=sid, intent="greeting", language=lang)
 
-    # ── Instant Fast-Paths for Greetings, Resume, Contact (Zero LLM Overhead) ──
-    if _is_greeting(msg):
-        await store.add_message(sid, "user", msg)
-        g = _clean(get_greeting(lang, portfolio_name=pname))
-        await store.add_message(sid, "assistant", g)
-        return ChatResponse(message=g, session_id=sid, intent="greeting", language=lang)
-
-    if _is_resume_request(msg):
-        await store.add_message(sid, "user", msg)
-        from prompts import get_fallback
-        resp = _clean(get_fallback("resume", lang, portfolio_name=pname))
-        await store.add_message(sid, "assistant", resp)
-        return ChatResponse(message=resp, session_id=sid, intent="resume_request", language=lang)
-
-    if _is_contact_request(msg):
-        await store.add_message(sid, "user", msg)
-        from prompts import get_fallback
-        resp = _clean(get_fallback("contact", lang, portfolio_name=pname))
-        await store.add_message(sid, "assistant", resp)
-        return ChatResponse(message=resp, session_id=sid, intent="contact_request", language=lang)
-
     await store.add_message(sid, "user", msg)
     history = await session_manager.format_history(db, sid)
     await session_manager.load_from_db(db, sid)
-
-    # ── Check for Resend Email Intent ───────────────────────────────────────
-    if _detect_resend_email(msg):
-        return await _handle_resend_email(sid, store, ms, hero, lang)
 
     # ── Active meeting flow (pending intent or pending meeting data) ────────
     pi = session_manager.get_pending_intent(sid)
@@ -575,7 +604,7 @@ async def chat_endpoint(
                 message=resp, session_id=sid, intent="meeting",
                 language=lang, meeting_progress=progress,
             )
-        elif _detect_cancel(msg):
+        elif _detect_cancel(msg) or msg.lower().strip() in ("no", "nahi", "nah", "nope"):
             session_manager.set_pending_intent(sid, "")
             resp = "No problem! Let me know if you need help with anything else." if lang != "hindi" else "Koi baat nahi! Agar aapko kisi aur cheez mein madad chahiye toh batayein."
             await store.add_message(sid, "assistant", resp)
@@ -588,13 +617,35 @@ async def chat_endpoint(
         m = mem.pending_meeting or MeetingData()
         return await _handle_meeting(m, msg, sid, store, ms, hero, lang, history)
 
+    # ── Check for Resend Email Intent ───────────────────────────────────────
+    if _detect_resend_email(msg):
+        return await _handle_resend_email(sid, store, ms, hero, lang)
+
+    # ── Instant Fast-Paths for Greetings, Resume, Contact (Zero LLM Overhead) ──
+    if _is_greeting(msg):
+        g = _clean(get_greeting(lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", g)
+        return ChatResponse(message=g, session_id=sid, intent="greeting", language=lang)
+
+    if _is_resume_request(msg):
+        from prompts import get_fallback
+        resp = _clean(get_fallback("resume", lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", resp)
+        return ChatResponse(message=resp, session_id=sid, intent="resume_request", language=lang)
+
+    if _is_contact_request(msg):
+        from prompts import get_fallback
+        resp = _clean(get_fallback("contact", lang, portfolio_name=pname))
+        await store.add_message(sid, "assistant", resp)
+        return ChatResponse(message=resp, session_id=sid, intent="contact_request", language=lang)
+
     # ── Router classification ───────────────────────────────────────────────
     intent, args = await classify_intent(history, pname)
 
     if intent == "meeting":
         # Check if the initial message is a vague single-word keyword
         msg_lower = msg.lower().strip()
-        is_single_word_meeting = len(msg_lower.split()) == 1 and any(w in msg_lower for w in ["meeting", "appoint", "call", "schedule", "book"])
+        is_single_word_meeting = len(msg_lower.split()) == 1 and any(w in msg_lower for w in ["meeting", "appoint", "call", "schedule", "book", "interview"])
         
         if is_single_word_meeting:
             resp = f"What do you mean by interview? Would you like to schedule an interview with {pname or 'the portfolio owner'}?" if lang != "hindi" else f"Aapka interview se kya matlab hai? Kya aap {pname or 'portfolio owner'} ke saath interview schedule karna chahte hain?"
@@ -613,9 +664,11 @@ async def chat_endpoint(
             else:
                 m.contact_number = None
         if m.meeting_date_time:
-            parsed = parse_datetime(m.meeting_date_time)
-            if parsed:
-                m.meeting_date_time = parsed
+            is_valid, dt_val, _ = validate_meeting_datetime(m.meeting_date_time, lang)
+            if is_valid:
+                m.meeting_date_time = dt_val
+            else:
+                m.meeting_date_time = None
 
         # Check if router already extracted some fields from the first message
         has_extracted = any(getattr(m, f, None) for f in [

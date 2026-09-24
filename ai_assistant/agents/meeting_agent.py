@@ -75,10 +75,42 @@ def _normalize_datetime_str(raw: str) -> str:
     return s
 
 
+# Words and phrases that unambiguously refer to the past
+_PAST_RELATIVE_PHRASES = [
+    "last night", "last morning", "last evening", "last afternoon",
+    "last week", "last month", "last year", "last weekend",
+    "last monday", "last tuesday", "last wednesday", "last thursday",
+    "last friday", "last saturday", "last sunday",
+    "earlier today", "hours ago", "days ago", "mins ago", "minutes ago",
+    "beeta kal", "beete kal", "pichla kal", "pichle hafte", "pichle mahine",
+    "pichle saal", "pichle somvar", "pichle mangalvar", "pichle budhvar",
+    "pichle guruvar", "pichle shukravar", "pichle shanivar", "pichle ravivar",
+    "kal jo beet gaya",
+]
+
+_PAST_RELATIVE_WORDS = {
+    "yesterday", "yesterday's", "yday",
+    "ago", "earlier", "previous",
+    "pichle", "pichhle", "pichla", "pichli", "beeta", "beete",
+}
+
+
+def _is_past_relative(text: str) -> bool:
+    """Return True if the text contains an unambiguous past-relative keyword or phrase."""
+    t = text.lower().strip()
+    for phrase in _PAST_RELATIVE_PHRASES:
+        if phrase in t:
+            return True
+    for word in _PAST_RELATIVE_WORDS:
+        if _re.search(rf"\b{_re.escape(word)}\b", t):
+            return True
+    return False
+
+
 def parse_datetime(text: str) -> str | None:
     """Parse a natural-language date/time string to ISO-8601 format."""
     if not text or not text.strip():
-        return text
+        return None
     text = text.strip()
     # Try normalizing first to substitute timezone abbreviations (IST → +05:30, etc.)
     normalized = _normalize_datetime_str(text)
@@ -92,7 +124,42 @@ def parse_datetime(text: str) -> str | None:
         dt = dt_parser.parse(text)
         return dt.isoformat()
     except Exception:
-        return text
+        return None
+
+
+def validate_meeting_datetime(val_str: str, language: str = "english") -> tuple[bool, str | None, str]:
+    """
+    Validates meeting_date_time string.
+    Returns: (is_valid, parsed_or_raw_value, error_message)
+    """
+    if not val_str or not val_str.strip():
+        return False, None, ""
+
+    val_str = val_str.strip()
+    past_err = (
+        "The date/time you mentioned has already passed! Please provide a future date and time (e.g., tomorrow 3 PM, or next Monday 10 AM IST)."
+        if language != "hindi" else
+        "Aapka diya hua date/time pehle hi guzar chuka hai! Kripya aane wala date aur time dein (e.g., kal 3 PM, ya agle somvar 10 AM IST)."
+    )
+
+    # 1. Block unambiguous past-relative words & phrases (e.g. yesterday, last week, pichle hafte)
+    if _is_past_relative(val_str):
+        return False, None, past_err
+
+    # 2. If it can be parsed as a concrete datetime, verify it is in the future
+    parsed_iso = parse_datetime(val_str)
+    if parsed_iso:
+        try:
+            _parsed_dt = dt_parser.parse(parsed_iso)
+            _now = datetime.now(_parsed_dt.tzinfo) if _parsed_dt.tzinfo else datetime.now()
+            if _parsed_dt <= _now:
+                return False, None, past_err
+            return True, parsed_iso, ""
+        except Exception:
+            pass
+
+    # 3. Future relative or natural language dates (e.g. "tomorrow 4pm IST", "next Monday 10 AM", "kal 3 PM")
+    return True, val_str, ""
 
 
 def _tz_offset_str(dt: datetime) -> str:
@@ -470,8 +537,11 @@ Resilience & 2000IQ Rules:
                             else:
                                 validation_errors.append(get_meeting_validation_error("connection_type", language))
                         elif field == "meeting_date_time":
-                            parsed = parse_datetime(val_str)
-                            current.meeting_date_time = parsed or val_str
+                            is_valid, dt_val, err = validate_meeting_datetime(val_str, language)
+                            if not is_valid:
+                                validation_errors.append(err)
+                            else:
+                                current.meeting_date_time = dt_val
                         else:
                             setattr(current, field, val_str)
                 
@@ -502,72 +572,30 @@ Resilience & 2000IQ Rules:
         progress = _build_progress(current, language)
         return summary, current, progress
 
-    # 3. If not complete, let the LLM generate the response requesting missing fields
-    collected_summary = ""
-    for fn, label in labels.items():
-        val = getattr(current, fn, None)
-        if val:
-            val_display = format_datetime_display(val) if fn == "meeting_date_time" else val
-            collected_summary += f"- {label}: {val_display}\n"
-    if not collected_summary:
-        collected_summary = "None yet."
-        
-    missing_summary = ""
-    for fn, label in labels.items():
-        val = getattr(current, fn, None)
-        if not val:
-            missing_summary += f"- {label} ({fn})\n"
-
-    # Show collected details so far in the response (same as before for visual consistency in UI)
+    # 3. Not complete — P2 Fix: use static next question (no 2nd LLM call → ~50% lower latency)
     prefix = get_meeting_collected_prefix(language)
     collected_lines = []
     for fn, label in labels.items():
         val = getattr(current, fn, None)
         if val:
-            collected_lines.append(f"{label}: {val}")
-    
+            val_display = format_datetime_display(val) if fn == "meeting_date_time" else val
+            collected_lines.append(f"{label}: {val_display}")
+
     collected_header = f"{prefix}\n" + "\n".join(collected_lines) + "\n\n" if collected_lines else ""
 
-    # Generate asking text using LLM
-    ask_system = f"""You are Daisy, an exceptionally intelligent, empathetic, and professional AI assistant for {pname}'s portfolio.
-You are helping a visitor schedule a meeting. You have collected some details, but still need a few more.
-
-Details collected so far:
-{collected_summary}
-
-Missing details:
-{missing_summary}
-
-Rules for responding:
-1. Language: Always respond fluently in {language}.
-2. Tone: Warm, welcoming, human, and concise.
-3. Multi-detail Extraction: Acknowledge any new details provided in the user's latest message.
-4. Handling Messy Input & Hinglish: Understand typos, informal phrasing, slangs, or mixed statements naturally.
-5. Connection Type Clarification: If asking for connection type (connection_type) or if user says "call" / "on call", clearly ask if they prefer an "online" meeting via Google Meet OR a direct "Phone Call". Do not mention internal technical terms like "offline" to the user.
-6. CRITICAL: Do NOT list or repeat the details already collected (such as name, email, phone, etc.). The system automatically displays the collected list. You must ONLY acknowledge new additions (if any) and naturally ask for missing details.
-7. CRITICAL: Plain text ONLY! Do NOT use any markdown formatting (no bold **, no italic *, no backticks).
-8. CRITICAL EMAIL & PHONE INSTRUCTION: Whenever asking for Email (email) or Phone Number (contact_number), ALWAYS explicitly tell the user to provide their real and exact email address / phone number so they can receive their interview confirmation, Google Meet link, and notification details.
-"""
-    
-    history_msgs = []
-    if history:
-        # Include last 4 messages for context
-        history_msgs = history[-4:]
+    # Get the next static field question directly from prompts (zero extra LLM cost)
+    current_field_idx = get_current_field_index(current, language)
+    if current_field_idx < len(fields):
+        _, next_question = fields[current_field_idx]
     else:
-        history_msgs = [{"role": "user", "content": latest_user_msg or "Hello"}]
-        
-    messages = [{"role": "system", "content": ask_system}] + history_msgs
-    
-    try:
-        response_text, _ = await call_llm(messages)
-    except Exception as e:
-        print(f"[Meeting Agent] LLM response generation failed, falling back to static questions: {e}")
-        # Fallback to static questions
-        current_field_idx = get_current_field_index(current, language)
-        _, question = fields[current_field_idx]
-        response_text = question
+        next_question = "Please provide the remaining details." if language != "hindi" else "Kripya baaki ki details dein."
 
-    final_resp = f"{collected_header}{response_text}"
+    # Brief acknowledgment if user just provided new details
+    ack = ""
+    if latest_user_msg and latest_user_msg.strip() and collected_lines:
+        ack = "Theek hai! " if language == "hindi" else "Got it! "
+
+    final_resp = f"{collected_header}{ack}{next_question}"
     progress = _build_progress(current, language)
     return final_resp, current, progress
 

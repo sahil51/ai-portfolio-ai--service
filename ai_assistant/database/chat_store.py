@@ -8,18 +8,26 @@ class ChatStore:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def add_message(self, session_id: str, role: str, content: str, metadata: dict | None = None) -> ChatMessage:
-        msg = ChatMessage(
-            session_id=session_id,
-            role=role,
-            content=content,
-            metadata_=metadata,
-        )
-        self.session.add(msg)
-        await self.session.flush()
-        await self._prune(session_id)
-        await self.session.commit()
-        return msg
+    async def add_message(self, session_id: str, role: str, content: str, metadata: dict | None = None) -> ChatMessage | None:
+        try:
+            msg = ChatMessage(
+                session_id=session_id,
+                role=role,
+                content=content,
+                metadata_=metadata,
+            )
+            self.session.add(msg)
+            await self.session.flush()
+            await self._prune(session_id)
+            await self.session.commit()
+            return msg
+        except Exception as e:
+            print(f"[ChatStore.add_message] Non-fatal DB write error: {e}")
+            try:
+                await self.session.rollback()
+            except Exception:
+                pass
+            return None
 
     async def get_history(self, session_id: str, limit: int | None = None) -> list[ChatMessage]:
         if limit is None:
