@@ -835,8 +835,9 @@ def build_email_html(
 
 
 def _send_email_sync(subject: str, text_body: str, html_body: str, recipient_email: str):
-    """Synchronous helper to send HTML + Plain Text email via SMTP."""
+    """Synchronous helper to send HTML + Plain Text email via SMTP with IPv4 enforcement."""
     import smtplib
+    import socket
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from config import settings
@@ -858,12 +859,22 @@ def _send_email_sync(subject: str, text_body: str, html_body: str, recipient_ema
     if html_body:
         msg.attach(MIMEText(html_body, 'html'))
 
+    # Force IPv4 DNS resolution to prevent [Errno 101] Network is unreachable on Render/Linux containers
+    orig_getaddrinfo = socket.getaddrinfo
+
+    def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = _ipv4_getaddrinfo
     try:
         if settings.EMAIL_USE_TLS:
             server = smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=15)
+            server.ehlo()
             server.starttls()
+            server.ehlo()
         else:
             server = smtplib.SMTP_SSL(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=15)
+            server.ehlo()
 
         server.login(user, pwd)
         server.send_message(msg)
@@ -871,6 +882,8 @@ def _send_email_sync(subject: str, text_body: str, html_body: str, recipient_ema
         print(f"[Meeting Agent Email] Successfully sent HTML email to {recipient_email}")
     except Exception as e:
         print(f"[Meeting Agent Email] Failed to send email to {recipient_email}: {e}")
+    finally:
+        socket.getaddrinfo = orig_getaddrinfo
 
 
 async def send_interview_email_notification(
