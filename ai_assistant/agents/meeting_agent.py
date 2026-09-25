@@ -1016,3 +1016,49 @@ async def send_interview_email_notification(
             await asyncio.to_thread(_send_email_sync, subject_candidate, text_candidate, html_candidate, candidate_recipient)
         except Exception as e:
             print(f"[Meeting Email Candidate Error]: {e}")
+
+
+async def send_cancellation_email_notification(
+    meeting_name: str,
+    company_name: str,
+    meeting_date_time: str,
+    recipient_email: str,
+    portfolio_name: str = "Sahil Thakur",
+):
+    """Sends cancellation notice email to Sahil and Candidate."""
+    from config import settings
+    sahil_name = portfolio_name.strip() if portfolio_name and portfolio_name.strip() else "Sahil Thakur"
+    sahil_email = settings.NOTIFICATION_EMAIL.strip() or "sahilrajput5321@gmail.com"
+    time_display = format_datetime_display(meeting_date_time) or meeting_date_time or "Scheduled time"
+
+    subject = f"Interview Cancelled: {meeting_name} with {sahil_name}"
+    text_body = f"""Hello,
+
+The interview scheduled for {time_display} between {meeting_name} ({company_name}) and {sahil_name} has been cancelled.
+
+Regards,
+Daisy - AI Assistant"""
+    html_body = build_email_html(
+        badge_text="INTERVIEW CANCELLED",
+        heading="Interview Cancelled",
+        intro_text=f"The interview scheduled for <strong>{time_display}</strong> has been cancelled.",
+        details=[
+            ("Candidate", meeting_name),
+            ("Company", company_name or "N/A"),
+            ("Scheduled Date/Time", time_display),
+            ("Status", '<span style="color:#ef4444;font-weight:700;">CANCELLED</span>'),
+        ],
+        closing_note="If you wish to reschedule, feel free to visit the portfolio and pick a new time slot anytime."
+    )
+
+    import asyncio
+    try:
+        await asyncio.to_thread(_send_email_sync, subject, text_body, html_body, sahil_email)
+    except Exception as e:
+        print(f"[Cancellation Email to Sahil Error]: {e}")
+
+    if recipient_email and recipient_email.strip():
+        try:
+            await asyncio.to_thread(_send_email_sync, subject, text_body, html_body, recipient_email.strip())
+        except Exception as e:
+            print(f"[Cancellation Email to Candidate Error]: {e}")

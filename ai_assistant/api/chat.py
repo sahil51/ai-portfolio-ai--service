@@ -16,7 +16,7 @@ from agents.meeting_agent import (
     extract_meeting_fields, send_to_n8n, format_meeting_response,
     resolve_edit_field, get_current_field_index, _build_progress,
     format_datetime_display, parse_datetime, validate_meeting_datetime,
-    send_interview_email_notification,
+    send_interview_email_notification, send_cancellation_email_notification,
 )
 from agents.answer_agent import generate_answer
 from prompts import (
@@ -536,6 +536,233 @@ def _is_contact_request(text: str) -> bool:
     return t_clean in {"contact", "email", "phone"}
 
 
+
+# ── Additional Precision Meeting Handlers (Get Link, Cancel, Reschedule) ────
+
+def _detect_get_meet_link(msg: str) -> bool:
+    """Detect if user is asking for their Google Meet / Interview link again."""
+    m = msg.lower().strip()
+    if any(c in m for c in ["cancel", "mat karo", "nahi chahiye", "band karo"]):
+        return False
+
+    m_clean = re.sub(r'[!.,?]+$', '', m).strip()
+    exact_phrases = {
+        "meet link", "meeting link", "interview link", "google meet", "gmeet", "gmeet link",
+        "link", "give link", "send link", "share link", "link please", "link do", "link bhejo",
+        "where is link", "where is the link", "where is my link", "what is my link",
+        "what is my meet link", "what is my interview link", "where is my interview link",
+        "link kya hai", "link kaha hai", "mera link", "mera meet link", "interview link kya hai",
+        "interview link kaha hai", "meeting link kaha hai", "meet link do", "join link", "meeting url",
+        "link nahi mila", "video call link"
+    }
+    if m_clean in exact_phrases:
+        return True
+
+    has_link_word = any(w in m for w in ["meet link", "meeting link", "interview link", "gmeet link", "gmeet", "google meet"])
+    if has_link_word:
+        if not any(w in m for w in ["what is google meet", "how to use google meet"]):
+            return True
+
+    has_request = any(w in m for w in ["where", "what", "give", "send", "kaha", "kya", "bhejo", "share", "provide"])
+    has_link = any(w in m for w in ["link", "url", "meet"])
+    has_interview_ctx = any(w in m for w in ["interview", "meeting", "call"])
+    return (has_request and has_link and has_interview_ctx) or (has_request and has_link and "my" in m)
+
+
+async def _handle_get_meet_link(
+    sid: str, store: ChatStore, ms: MeetingStore, hero: dict, lang: str = ""
+) -> ChatResponse:
+    rec = await ms.get_confirmed_by_session(sid)
+    if not rec:
+        rec = await ms.get_by_session(sid)
+
+    if rec and rec.status == 'confirmed' and rec.meet_link:
+        time_display = format_datetime_display(rec.meeting_date_time) or rec.meeting_date_time or "Scheduled time"
+        conn_display = "Online (Google Meet)" if (rec.connection_type or "online").lower() == "online" else "Phone Call"
+
+        if lang == "hindi":
+            msg = (
+                f"""Aapke scheduled interview ka Google Meet link yeh raha:
+
+🔗 **Google Meet Link:** {rec.meet_link}
+📅 **Date & Time:** {time_display}
+📌 **Type:** {conn_display}
+👤 **Candidate:** {rec.name} ({rec.company_name or 'N/A'})
+
+Aap scheduled time par upar diye gaye link par click karke interview join kar sakte hain!"""
+            )
+        else:
+            msg = (
+                f"""Here are the details for your scheduled interview:
+
+🔗 **Google Meet Link:** {rec.meet_link}
+📅 **Date & Time:** {time_display}
+📌 **Type:** {conn_display}
+👤 **Candidate:** {rec.name} ({rec.company_name or 'N/A'})
+
+You can click the link above at the scheduled time to join the interview!"""
+            )
+        msg = _clean(msg)
+        await store.add_message(sid, "assistant", msg)
+        return ChatResponse(message=msg, session_id=sid, intent="get_meet_link", language=lang, meet_link=rec.meet_link)
+
+    elif rec and rec.status == 'cancelled':
+        msg = (
+            "Aapka previous interview cancel ho chuka hai. Agar aap naya interview schedule karna chahte hain, toh 'schedule another meeting' bolein!"
+            if lang == "hindi"
+            else "Your previous interview was cancelled. If you would like to schedule a new interview with Sahil, just say 'schedule another meeting'!"
+        )
+        msg = _clean(msg)
+        await store.add_message(sid, "assistant", msg)
+        return ChatResponse(message=msg, session_id=sid, intent="interview_already_cancelled", language=lang)
+
+    else:
+        msg = (
+            "Aapke is session me koi confirmed interview nahi mila. Kya aap Sahil ke sath interview schedule karna chahte hain?"
+            if lang == "hindi"
+            else "I couldn't find a confirmed interview for this session. Would you like to schedule an interview with Sahil now?"
+        )
+        msg = _clean(msg)
+        await store.add_message(sid, "assistant", msg)
+        return ChatResponse(message=msg, session_id=sid, intent="no_interview_found", language=lang)
+
+
+def _detect_cancel_meeting(msg: str) -> bool:
+    """Detect if user wants to cancel their interview (even if confirmed)."""
+    m = msg.lower().strip()
+    cancel_keywords = [
+        "cancel meeting", "cancel my meeting", "cancel interview", "cancel my interview",
+        "meeting cancel", "interview cancel", "cancel scheduled meeting", "cancel appointment",
+        "meeting cancel kardo", "interview cancel kardo", "cancel kardo meeting",
+        "cancel kardo interview", "mujhe meeting cancel karni hai", "mujhe interview cancel karna hai",
+        "call cancel", "cancel call", "meeting radd", "cancel confirmed meeting"
+    ]
+    if any(k in m for k in cancel_keywords):
+        return True
+    words = m.split()
+    if "cancel" in words and any(w in words for w in ["meeting", "interview", "appointment", "call"]):
+        return True
+    return False
+
+
+async def _handle_cancel_confirmed_meeting(
+    sid: str, store: ChatStore, ms: MeetingStore, hero: dict, lang: str = ""
+) -> ChatResponse:
+    session_manager.clear_meeting(sid)
+    rec = await ms.cancel_meeting(sid)
+    pname = hero.get("name", "Sahil Thakur")
+
+    if rec:
+        time_display = format_datetime_display(rec.meeting_date_time) or rec.meeting_date_time or "your scheduled time"
+        import asyncio
+        asyncio.create_task(
+            send_cancellation_email_notification(
+                meeting_name=rec.name or "Candidate",
+                company_name=rec.company_name or "",
+                meeting_date_time=rec.meeting_date_time or "",
+                recipient_email=rec.email or "",
+                portfolio_name=pname,
+            )
+        )
+
+        if lang == "hindi":
+            msg = (
+                f"""{time_display} ke liye schedule kiya gaya aapka interview successfully cancel kar diya gaya hai.
+
+Agar aap kisi aur time par interview reschedule karna chahte hain ya nayi meeting book karna chahte hain, toh bas 'schedule another meeting' ya 'reschedule' bol dijiye!"""
+            )
+        else:
+            msg = (
+                f"""Your interview scheduled for {time_display} has been successfully cancelled.
+
+If you would like to reschedule or book a new time that works better for you, simply say 'schedule another meeting' or 'reschedule'!"""
+            )
+    else:
+        msg = (
+            "Aapka koi active ya scheduled interview nahi mila jise cancel kiya ja sake."
+            if lang == "hindi"
+            else "You don't have an active interview scheduled to cancel."
+        )
+
+    msg = _clean(msg)
+    await store.add_message(sid, "assistant", msg)
+
+    progress = MeetingProgress(
+        step=0, total=8, field="", completed_fields={},
+        confirmation_pending=False, cancelled=True,
+    )
+    return ChatResponse(
+        message=msg, session_id=sid, intent="meeting_cancelled",
+        language=lang, meeting_progress=progress,
+    )
+
+
+def _detect_reschedule_or_new_meeting(msg: str) -> bool:
+    """Detect if user wants to reschedule or book another interview."""
+    m = msg.lower().strip()
+    reschedule_keywords = [
+        "schedule another meeting", "book another interview", "book another meeting",
+        "schedule another interview", "reschedule", "reschedule interview", "reschedule meeting",
+        "nayi meeting schedule karo", "naya interview", "nayi meeting", "ek aur meeting",
+        "ek aur interview", "another meeting", "another interview", "new interview",
+        "new meeting", "change meeting date", "change time", "change date", "different time",
+        "book one more", "schedule one more", "ek aur bar meeting", "dusra time"
+    ]
+    return any(k in m for k in reschedule_keywords)
+
+
+async def _handle_reschedule_or_new_meeting(
+    sid: str, store: ChatStore, ms: MeetingStore, hero: dict, lang: str = ""
+) -> ChatResponse:
+    pname = hero.get("name", "Sahil Thakur")
+    session_manager.clear_meeting(sid)
+    prev_rec = await ms.get_by_session(sid)
+
+    if prev_rec and prev_rec.name and prev_rec.email:
+        # Pre-fill candidate info so they don't have to re-type basic details!
+        m = MeetingData(
+            name=prev_rec.name,
+            company_name=prev_rec.company_name,
+            company_address=prev_rec.company_address,
+            email=prev_rec.email,
+            contact_number=prev_rec.contact_number,
+            meeting_purpose=prev_rec.meeting_purpose,
+            connection_type=prev_rec.connection_type or "online",
+        )
+        if lang == "hindi":
+            msg = (
+                f"""Bilkul! Chaliye {pname} ke sath aapka naya interview schedule karte hain.
+
+Aapki contact details mere paas saved hain ({prev_rec.name}, {prev_rec.email}). Nayi meeting ke liye aapka preferred Date aur Time kya hoga? (jaise: 'tomorrow 4 PM' ya '28 Sep 3 PM')"""
+            )
+        else:
+            msg = (
+                f"""Sure! Let's schedule a new interview with {pname}.
+
+I have your contact details saved ({prev_rec.name}, {prev_rec.email}). What preferred Date and Time would you like for this new meeting? (e.g. 'tomorrow 4 PM' or '28 Sep 3 PM')"""
+            )
+        session_manager.set_pending_intent(sid, "meeting")
+        session_manager.set_pending_meeting(sid, m)
+        progress = _build_progress(m, lang)
+    else:
+        m = MeetingData()
+        fields = get_meeting_fields(lang)
+        first_q = _clean(fields[0][1])
+        msg = get_meeting_start_message(first_q, lang, portfolio_name=pname)
+        session_manager.set_pending_intent(sid, "meeting")
+        session_manager.set_pending_meeting(sid, m)
+        progress = MeetingProgress(
+            step=1, total=len(fields), field=fields[0][0],
+            completed_fields={},
+        )
+
+    msg = _clean(msg)
+    await store.add_message(sid, "assistant", msg)
+    return ChatResponse(
+        message=msg, session_id=sid, intent="meeting",
+        language=lang, meeting_progress=progress,
+    )
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     req: ChatRequest,
@@ -640,6 +867,18 @@ async def chat_endpoint(
     # ── Check for Resend Email Intent ───────────────────────────────────────
     if _detect_resend_email(msg):
         return await _handle_resend_email(sid, store, ms, hero, lang)
+
+    # ── Check for Cancel Meeting Intent (Pending or Confirmed) ──────────────
+    if _detect_cancel_meeting(msg):
+        return await _handle_cancel_confirmed_meeting(sid, store, ms, hero, lang)
+
+    # ── Check for Get Meeting Link Intent ───────────────────────────────────
+    if _detect_get_meet_link(msg):
+        return await _handle_get_meet_link(sid, store, ms, hero, lang)
+
+    # ── Check for Reschedule or Book Another Meeting Intent ──────────────────
+    if _detect_reschedule_or_new_meeting(msg):
+        return await _handle_reschedule_or_new_meeting(sid, store, ms, hero, lang)
 
     # ── Instant Fast-Paths for Greetings, Resume, Contact (Zero LLM Overhead) ──
     if _is_greeting(msg):
