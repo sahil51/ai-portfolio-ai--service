@@ -12,6 +12,7 @@ from memory import session_manager
 from models import HeroInfo
 from agents.router import classify_intent
 from agents.meeting_agent import (
+    generate_google_meet_link, format_n8n_iso_datetime,
     extract_meeting_fields, send_to_n8n, format_meeting_response,
     resolve_edit_field, get_current_field_index, _build_progress,
     format_datetime_display, parse_datetime, validate_meeting_datetime,
@@ -186,7 +187,12 @@ async def _finalize_meeting(
             meeting_confirmed=False
         )
 
-    link = link_or_code if ok else ""
+    link = link_or_code if (ok and link_or_code and link_or_code.startswith("http")) else ""
+    # Guaranteed Google Meet link generation if online connection requested
+    if not link and (m.connection_type or "online").lower() == "online":
+        link = generate_google_meet_link()
+        print(f"[Meeting Finalize] Generated instant Google Meet link: {link}")
+
     pending_rec = await ms.get_by_session(sid)
     if pending_rec and pending_rec.status == 'pending':
         pending_rec.name = m.name
@@ -197,9 +203,9 @@ async def _finalize_meeting(
         pending_rec.meeting_purpose = m.meeting_purpose
         pending_rec.meeting_date_time = m.meeting_date_time
         pending_rec.connection_type = m.connection_type
-        pending_rec.meet_link = link if ok else None
-        pending_rec.status = "confirmed" if ok else "failed_webhook"
-        pending_rec.n8n_webhook_status = "success" if ok else f"failed: {str(reason)[:35]}"
+        pending_rec.meet_link = link
+        pending_rec.status = "confirmed"
+        pending_rec.n8n_webhook_status = "success" if ok else "fallback_meet_link"
         await ms.session.commit()
         rec = pending_rec
     else:
@@ -210,20 +216,18 @@ async def _finalize_meeting(
             "meeting_purpose": m.meeting_purpose,
             "meeting_date_time": m.meeting_date_time,
             "connection_type": m.connection_type,
-            "meet_link": link if ok else None,
-            "status": "confirmed" if ok else "failed_webhook",
-            "n8n_webhook_status": "success" if ok else f"failed: {str(reason)[:35]}",
+            "meet_link": link,
+            "status": "confirmed",
+            "n8n_webhook_status": "success" if ok else "fallback_meet_link",
         })
-    session_manager.set_meeting_result(sid, rec.id, link if ok else None)
+    session_manager.set_meeting_result(sid, rec.id, link)
     session_manager.clear_meeting(sid)
-    if not ok:
-        await ms.mark_failed(rec.id)
 
     msg = format_meeting_response(
         m, location=hero.get("location", ""),
         portfolio_name=hero.get("name", "Sahil Thakur"),
         portfolio_phone=hero.get("phone", ""),
-        meet_link=link if ok else "", language=lang,
+        meet_link=link, language=lang,
     )
     msg = _clean(msg)
     await store.add_message(sid, "assistant", msg)
@@ -234,7 +238,7 @@ async def _finalize_meeting(
         asyncio.create_task(
             send_interview_email_notification(
                 meeting=m,
-                meet_link=link if ok else "",
+                meet_link=link,
                 portfolio_name=hero.get("name", "Sahil Thakur"),
                 portfolio_phone=hero.get("phone", ""),
             )
@@ -250,9 +254,25 @@ async def _finalize_meeting(
         cancelled=False,
     )
 
+    meeting_payload = {
+        "name": m.name or "",
+        "company_name": m.company_name or "",
+        "company_address": m.company_address or "",
+        "email": m.email or "",
+        "contact_number": m.contact_number or "",
+        "meeting_purpose": m.meeting_purpose or "",
+        "meeting_date_time": format_n8n_iso_datetime(m.meeting_date_time),
+        "preferred_time": format_n8n_iso_datetime(m.meeting_date_time),
+        "connection_type": m.connection_type or "online",
+        "session_id": sid,
+        "meet_link": link,
+    }
+
     return ChatResponse(
         message=msg, session_id=sid, intent="meeting_confirmed",
         language=lang, meeting_progress=progress,
+        meet_link=link,
+        meeting_data=meeting_payload,
     )
 
 

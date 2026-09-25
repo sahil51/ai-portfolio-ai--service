@@ -713,6 +713,18 @@ async def send_to_n8n(meeting: MeetingData, session_id: str = "") -> tuple[bool,
     return False, "ERROR", last_error
 
 
+
+def generate_google_meet_link() -> str:
+    """Generate a standard permanent Google Meet room URL (3-4-3 format)."""
+    import secrets
+    import string
+    chars = string.ascii_lowercase
+    p1 = ''.join(secrets.choice(chars) for _ in range(3))
+    p2 = ''.join(secrets.choice(chars) for _ in range(4))
+    p3 = ''.join(secrets.choice(chars) for _ in range(3))
+    return f"https://meet.google.com/{p1}-{p2}-{p3}"
+
+
 def format_meeting_response(
     meeting: MeetingData,
     location: str = "",

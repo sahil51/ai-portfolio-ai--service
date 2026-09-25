@@ -25,6 +25,8 @@ class ChatResponse(BaseModel):
     intent: str = "general_query"
     language: str = ""
     meeting_progress: Optional[MeetingProgress] = None
+    meet_link: Optional[str] = None
+    meeting_data: Optional[dict] = None
 
 
 class MeetingData(BaseModel):
