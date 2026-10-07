@@ -510,7 +510,10 @@ Resilience & 2000IQ Rules:
             ]
 
         try:
-            _, tool_call = await call_llm(messages, tools=[extract_tool])
+            _, tool_call = await asyncio.wait_for(
+                call_llm(messages, tools=[extract_tool]),
+                timeout=10.0
+            )
             if tool_call and tool_call.get("name") == "update_meeting_details":
                 args = tool_call.get("arguments", {})
                 print(f"[Meeting Agent] Extracted arguments from LLM: {args}")
@@ -553,7 +556,27 @@ Resilience & 2000IQ Rules:
                     return err_msg, current, progress
 
         except Exception as e:
-            print(f"[Meeting Agent] LLM extraction failed/errored: {e}")
+            print(f"[Meeting Agent] LLM extraction failed/errored or timed out: {e}")
+
+        # Fallback / Direct rule-based extraction safety net:
+        # If LLM didn't extract the field or had a hiccup, rule-based extraction ensures
+        # user messages like "my name is Megha", email, phone, etc. are never dropped.
+        current_idx = get_current_field_index(current, language)
+        if current_idx < len(fields):
+            curr_field_name, _ = fields[current_idx]
+            if getattr(current, curr_field_name, None) is None:
+                _validate_and_set_field(current, curr_field_name, latest_user_msg, language)
+
+        # Standalone regex extraction for email and phone numbers anywhere in text
+        if not current.email:
+            email_match = _re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', latest_user_msg)
+            if email_match and MeetingData.validate_email(email_match.group(0)):
+                current.email = email_match.group(0)
+
+        if not current.contact_number:
+            phone_match = _re.search(r'[\+]?[\d\s\-\(\)]{10,15}', latest_user_msg)
+            if phone_match and MeetingData.validate_phone(phone_match.group(0)):
+                current.contact_number = MeetingData.normalize_phone(phone_match.group(0))
 
     # 2. Check if all fields are complete
     if current.is_complete():

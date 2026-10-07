@@ -12,7 +12,7 @@ services:
       - key: CHAT_API_PORT
         value: 8001
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-3.8-flash
       - key: EMBEDDING_MODEL
         value: gemini-embedding-001
       - key: INTERNAL_API_KEY

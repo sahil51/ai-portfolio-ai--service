@@ -34,7 +34,7 @@ class Settings:
 
     @property
     def GEMINI_MODEL(self) -> str:
-        return os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite')
+        return os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')
 
     @property
     def EMBEDDING_MODEL(self) -> str:

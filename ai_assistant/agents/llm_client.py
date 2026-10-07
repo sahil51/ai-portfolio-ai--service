@@ -27,16 +27,29 @@ def _is_transient_error(e: Exception) -> bool:
 
 
 def _get_candidate_models() -> list[str]:
-    """Returns candidate Gemini models starting with fast models and verified fallbacks."""
-    primary = settings.GEMINI_MODEL.strip()
-    # Prioritize gemini-3.6-flash and gemini-3.5-flash-lite for speed and stability
-    fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    """
+    Returns candidate Gemini models prioritized by the latest official GA production models.
+    Prioritizes Gemini 3.x flagship models (gemini-3.8-flash, gemini-3.5-flash, gemini-3.5-flash-lite)
+    which are the active long-term GA standards with zero deprecation risk.
+    """
+    primary = settings.GEMINI_MODEL.strip() if settings.GEMINI_MODEL else ""
+    # Intermediate preview checkpoints or empty values are upgraded to the GA flagship
+    if primary in {"gemini-3.6-flash", "gemini-3.0-flash", "gemini-3-flash-preview"} or not primary:
+        primary = "gemini-3.8-flash"
+
+    # Official GA production models in priority order:
+    latest_production_models = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+    ]
     candidates = []
-    if primary and primary not in fallbacks:
+    if primary not in candidates:
         candidates.append(primary)
-    for fb in fallbacks:
-        if fb not in candidates:
-            candidates.append(fb)
+    for m in latest_production_models:
+        if m not in candidates:
+            candidates.append(m)
     return candidates
 
 
