@@ -78,9 +78,11 @@ CANCEL_KEYWORDS = [
 ]
 
 CONFIRM_KEYWORDS = [
-    "confirm", "yes", "haan", "okay", "theek hai",
-    "thik hai", "schedule karo", "book karo", "done", "proceed",
-    "confirmed", "sure", "bilkul",
+    "confirm", "yes", "haan", "okay", "ok", "ha", "haa", "haanji",
+    "theek hai", "thik hai", "schedule karo", "book karo", "done", "proceed",
+    "confirmed", "sure", "bilkul", "sahi hai", "all good", "perfect",
+    "looks good", "yep", "yeah", "yup", "schedule", "book", "confirm it",
+    "please confirm",
 ]
 
 EDIT_KEYWORDS = [
@@ -101,8 +103,9 @@ def _detect_cancel(msg: str) -> bool:
 def _is_confirm(msg: str) -> bool:
     """Check if user explicitly confirms (only valid during confirmation-pending)."""
     lower = msg.strip().lower()
+    lower_clean = re.sub(r'[!.,?]+$', '', lower).strip()
     for kw in CONFIRM_KEYWORDS:
-        if kw == lower or lower.startswith(kw + " "):
+        if kw == lower_clean or lower_clean.startswith(kw + " ") or lower_clean.endswith(" " + kw):
             return True
     return False
 
@@ -232,19 +235,20 @@ async def _finalize_meeting(
     msg = _clean(msg)
     await store.add_message(sid, "assistant", msg)
 
-    # Trigger background email notification (to Sahil & Candidate)
+    # Send interview email notification (to Sahil & Candidate) reliably before returning
     try:
         import asyncio
-        asyncio.create_task(
+        await asyncio.wait_for(
             send_interview_email_notification(
                 meeting=m,
                 meet_link=link,
                 portfolio_name=hero.get("name", "Sahil Thakur"),
                 portfolio_phone=hero.get("phone", ""),
-            )
+            ),
+            timeout=8.0,
         )
     except Exception as e:
-        print(f"[Meeting Email Trigger Error]: {e}")
+        print(f"[Meeting Email Delivery Error]: {e}")
 
     # Build final success progress
     progress = MeetingProgress(
@@ -300,12 +304,15 @@ def _detect_resend_email(msg: str) -> bool:
         "resend", "reshare", "send again", "send email again",
         "send mail again", "email again", "mail again", "dobara email", "dobara mail",
         "phirse email", "phirse mail", "email dobara", "mail dobara", "mail nahi aaya",
-        "email nahi aaya", "confirmation email", "confirmation mail"
+        "email nahi aaya", "confirmation email", "confirmation mail",
+        "did not get email", "didn't get email", "not get email", "did not get this on email",
+        "haven't received email", "haven't got email", "email nahi mila", "mail nahi mili",
+        "email nahi aayi", "mail nahi aayi", "got no email", "received no email",
     ]
     if any(k in m for k in keywords):
         return True
 
-    has_action = any(w in m for w in ["send", "resend", "reshare", "bhej", "dobara", "phirse"])
+    has_action = any(w in m for w in ["send", "resend", "reshare", "bhej", "dobara", "phirse", "get", "receive", "mila", "aaya"])
     has_target = any(w in m for w in ["email", "mail", "confirmation", "again"])
     return has_action and has_target
 
@@ -336,14 +343,18 @@ async def _handle_resend_email(
     )
 
     import asyncio
-    asyncio.create_task(
-        send_interview_email_notification(
-            meeting=m,
-            meet_link=rec.meet_link or "",
-            portfolio_name=hero.get("name", "Sahil Thakur"),
-            portfolio_phone=hero.get("phone", ""),
+    try:
+        await asyncio.wait_for(
+            send_interview_email_notification(
+                meeting=m,
+                meet_link=rec.meet_link or "",
+                portfolio_name=hero.get("name", "Sahil Thakur"),
+                portfolio_phone=hero.get("phone", ""),
+            ),
+            timeout=8.0,
         )
-    )
+    except Exception as e:
+        print(f"[Resend Email Delivery Error]: {e}")
 
     recipient_email = rec.email or "your email address"
     msg = (
@@ -649,21 +660,27 @@ async def _handle_cancel_confirmed_meeting(
     sid: str, store: ChatStore, ms: MeetingStore, hero: dict, lang: str = ""
 ) -> ChatResponse:
     session_manager.clear_meeting(sid)
-    rec = await ms.cancel_meeting(sid)
+    rec, was_confirmed = await ms.cancel_meeting(sid)
     pname = hero.get("name", "Sahil Thakur")
 
     if rec:
         time_display = format_datetime_display(rec.meeting_date_time) or rec.meeting_date_time or "your scheduled time"
-        import asyncio
-        asyncio.create_task(
-            send_cancellation_email_notification(
-                meeting_name=rec.name or "Candidate",
-                company_name=rec.company_name or "",
-                meeting_date_time=rec.meeting_date_time or "",
-                recipient_email=rec.email or "",
-                portfolio_name=pname,
-            )
-        )
+        # Only send cancellation notice if this meeting was actually confirmed previously
+        if was_confirmed:
+            import asyncio
+            try:
+                await asyncio.wait_for(
+                    send_cancellation_email_notification(
+                        meeting_name=rec.name or "Candidate",
+                        company_name=rec.company_name or "",
+                        meeting_date_time=rec.meeting_date_time or "",
+                        recipient_email=rec.email or "",
+                        portfolio_name=pname,
+                    ),
+                    timeout=8.0,
+                )
+            except Exception as e:
+                print(f"[Cancellation Email Delivery Error]: {e}")
 
         if lang == "hindi":
             msg = (

@@ -62,8 +62,8 @@ class MeetingStore:
     async def get_latest_by_session(self, session_id: str) -> MeetingRequest | None:
         return await self.get_by_session(session_id)
 
-    async def cancel_meeting(self, session_id: str) -> MeetingRequest | None:
-        """Cancels any active or confirmed meeting for this session."""
+    async def cancel_meeting(self, session_id: str) -> tuple[MeetingRequest | None, bool]:
+        """Cancels any active or confirmed meeting for this session. Returns (record, was_previously_confirmed)."""
         stmt = (
             select(MeetingRequest)
             .where(MeetingRequest.session_id == session_id)
@@ -73,10 +73,12 @@ class MeetingStore:
         )
         result = await self.session.execute(stmt)
         record = result.scalar_one_or_none()
+        was_confirmed = False
         if record:
+            was_confirmed = (record.status == 'confirmed')
             record.status = 'cancelled'
             await self.session.commit()
-        return record
+        return record, was_confirmed
 
     async def get_confirmed_by_session(self, session_id: str) -> MeetingRequest | None:
         """Gets the most recent confirmed meeting for this session."""

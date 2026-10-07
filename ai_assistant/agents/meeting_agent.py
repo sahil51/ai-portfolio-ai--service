@@ -1001,21 +1001,22 @@ async def send_interview_email_notification(
             closing_note=f"You can call candidate <strong>{sahil_name}</strong> at <strong>{phone_display}</strong> or expect a call at <strong>{meeting.contact_number}</strong> at the scheduled time."
         )
 
-    # Send to Sahil (NOTIFICATION_EMAIL or EMAIL_HOST_USER)
+    # Send to Sahil (NOTIFICATION_EMAIL or EMAIL_HOST_USER) and Candidate concurrently
+    tasks = []
     admin_recipient = settings.NOTIFICATION_EMAIL.strip() or settings.EMAIL_HOST_USER.strip()
     if admin_recipient:
-        try:
-            await asyncio.to_thread(_send_email_sync, subject_admin, text_admin, html_admin, admin_recipient)
-        except Exception as e:
-            print(f"[Meeting Email Admin Error]: {e}")
+        tasks.append(asyncio.to_thread(_send_email_sync, subject_admin, text_admin, html_admin, admin_recipient))
 
-    # Send to Candidate (meeting.email)
     candidate_recipient = (meeting.email or "").strip()
-    if candidate_recipient:
-        try:
-            await asyncio.to_thread(_send_email_sync, subject_candidate, text_candidate, html_candidate, candidate_recipient)
-        except Exception as e:
-            print(f"[Meeting Email Candidate Error]: {e}")
+    # Avoid duplicate emails if candidate entered Sahil's own admin email
+    if candidate_recipient and candidate_recipient.lower() != admin_recipient.lower():
+        tasks.append(asyncio.to_thread(_send_email_sync, subject_candidate, text_candidate, html_candidate, candidate_recipient))
+
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                print(f"[Meeting Email Error]: {r}")
 
 
 async def send_cancellation_email_notification(
@@ -1052,13 +1053,14 @@ Daisy - AI Assistant"""
     )
 
     import asyncio
-    try:
-        await asyncio.to_thread(_send_email_sync, subject, text_body, html_body, sahil_email)
-    except Exception as e:
-        print(f"[Cancellation Email to Sahil Error]: {e}")
+    tasks = []
+    if sahil_email:
+        tasks.append(asyncio.to_thread(_send_email_sync, subject, text_body, html_body, sahil_email))
+    if recipient_email and recipient_email.strip() and recipient_email.strip().lower() != sahil_email.lower():
+        tasks.append(asyncio.to_thread(_send_email_sync, subject, text_body, html_body, recipient_email.strip()))
 
-    if recipient_email and recipient_email.strip():
-        try:
-            await asyncio.to_thread(_send_email_sync, subject, text_body, html_body, recipient_email.strip())
-        except Exception as e:
-            print(f"[Cancellation Email to Candidate Error]: {e}")
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                print(f"[Cancellation Email Error]: {r}")
