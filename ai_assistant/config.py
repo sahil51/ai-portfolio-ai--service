@@ -70,7 +70,7 @@ class Settings:
     MAX_SESSION_MESSAGES: int = int(os.getenv('MAX_SESSION_MESSAGES', '20'))
     MAX_IP_REQUESTS_PER_MIN: int = int(os.getenv('MAX_IP_REQUESTS_PER_MIN', '10'))
 
-    # SMTP Email Config
+    # SMTP & HTTP Email Config
     EMAIL_HOST: str = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
     EMAIL_PORT: int = int(os.getenv('EMAIL_PORT', '587'))
     EMAIL_USE_TLS: bool = os.getenv('EMAIL_USE_TLS', 'true').lower() in ('true', '1')
@@ -78,6 +78,8 @@ class Settings:
     EMAIL_HOST_PASSWORD: str = os.getenv('EMAIL_HOST_PASSWORD', 'bpyxoyabrtcqrsra')
     DEFAULT_FROM_EMAIL: str = os.getenv('DEFAULT_FROM_EMAIL', 'sahilrajput5321@gmail.com')
     NOTIFICATION_EMAIL: str = os.getenv('NOTIFICATION_EMAIL', 'sahilrajput5321@gmail.com')
+    RESEND_API_KEY: str = os.getenv('RESEND_API_KEY', '')
+    BREVO_API_KEY: str = os.getenv('BREVO_API_KEY', '')
 
 
 settings = Settings()

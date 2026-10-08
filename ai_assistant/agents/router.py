@@ -1,11 +1,13 @@
 import re
+from agents.meeting_agent import smart_multi_field_extractor
 
 MEETING_KEYWORDS = [
     "schedule", "meeting", "interview", "book a call", "book call",
     "book a meeting", "appointment", "discuss project", "want to talk",
     "let's talk", "want to meet", "set up a call", "arrange a meeting",
     "book an interview", "schedule interview", "take interview", "interview schedule",
-    "hire", "hire you", "hire sahil", "call"
+    "hire", "hire you", "hire sahil", "call", "google meet", "gmeet", "meet",
+    "milte hain", "milna", "baat karni hai", "baat karni", "connect karna", "video call"
 ]
 
 
@@ -17,9 +19,14 @@ async def classify_intent(messages: list[dict], portfolio_name: str = "the portf
     last_msg = messages[-1]["content"] if messages else ""
     msg_lower = last_msg.lower().strip()
 
+    # Fast multi-field extraction check (e.g. user provided date/time or connection type for meeting)
+    extracted = smart_multi_field_extractor(last_msg)
+    if extracted.get("meeting_date_time") or extracted.get("connection_type"):
+        return "meeting", extracted
+
     # Check for meeting keywords
     for kw in MEETING_KEYWORDS:
         if kw in msg_lower:
-            return "meeting", {}
+            return "meeting", extracted
 
     return "general_query", {"query": last_msg}

@@ -556,9 +556,13 @@ def _detect_get_meet_link(msg: str) -> bool:
     if any(c in m for c in ["cancel", "mat karo", "nahi chahiye", "band karo"]):
         return False
 
+    # If user is providing details (email, phone, name, schedule intent), do NOT intercept as get link
+    if "@" in m or any(k in m for k in ["schedule", "book", "prefer", "chahta", "chahti", "naam", "my name"]):
+        return False
+
     m_clean = re.sub(r'[!.,?]+$', '', m).strip()
     exact_phrases = {
-        "meet link", "meeting link", "interview link", "google meet", "gmeet", "gmeet link",
+        "meet link", "meeting link", "interview link", "gmeet link",
         "link", "give link", "send link", "share link", "link please", "link do", "link bhejo",
         "where is link", "where is the link", "where is my link", "what is my link",
         "what is my meet link", "what is my interview link", "where is my interview link",
@@ -569,14 +573,9 @@ def _detect_get_meet_link(msg: str) -> bool:
     if m_clean in exact_phrases:
         return True
 
-    has_link_word = any(w in m for w in ["meet link", "meeting link", "interview link", "gmeet link", "gmeet", "google meet"])
-    if has_link_word:
-        if not any(w in m for w in ["what is google meet", "how to use google meet"]):
-            return True
-
-    has_request = any(w in m for w in ["where", "what", "give", "send", "kaha", "kya", "bhejo", "share", "provide"])
-    has_link = any(w in m for w in ["link", "url", "meet"])
-    has_interview_ctx = any(w in m for w in ["interview", "meeting", "call"])
+    has_request = any(w in m for w in ["where", "what", "give", "send", "kaha", "kya", "bhejo", "share", "provide", "bhej", "do"])
+    has_link = any(w in m for w in ["link", "url", "meet link", "gmeet link"])
+    has_interview_ctx = any(w in m for w in ["interview", "meeting", "call", "mera", "my"])
     return (has_request and has_link and has_interview_ctx) or (has_request and has_link and "my" in m)
 
 

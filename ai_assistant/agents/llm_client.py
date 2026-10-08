@@ -28,21 +28,17 @@ def _is_transient_error(e: Exception) -> bool:
 
 def _get_candidate_models() -> list[str]:
     """
-    Returns candidate Gemini models prioritized by the latest official GA production models.
-    Prioritizes Gemini 3.x flagship models (gemini-3.8-flash, gemini-3.5-flash, gemini-3.5-flash-lite)
-    which are the active long-term GA standards with zero deprecation risk.
+    Returns candidate Gemini models prioritized by official GA production models in Google GenAI API.
     """
     primary = settings.GEMINI_MODEL.strip() if settings.GEMINI_MODEL else ""
-    # Intermediate preview checkpoints or empty values are upgraded to the GA flagship
-    if primary in {"gemini-3.6-flash", "gemini-3.0-flash", "gemini-3-flash-preview"} or not primary:
-        primary = "gemini-3.8-flash"
+    if not primary or "gemini-3." in primary:
+        primary = "gemini-2.5-flash"
 
-    # Official GA production models in priority order:
     latest_production_models = [
-        "gemini-3.8-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
         "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
     ]
     candidates = []
     if primary not in candidates:
@@ -110,10 +106,17 @@ async def call_llm(messages: list[dict], tools: list | None = None) -> tuple[str
     candidate_models = _get_candidate_models()
 
     formatted = []
+    last_role = None
     for m in messages:
         role = "user" if m.get("role") in ("user", "system") else "model"
         content_text = m.get("content", "")
-        formatted.append(types.Content(role=role, parts=[types.Part.from_text(text=content_text)]))
+        if not content_text.strip():
+            continue
+        if formatted and role == last_role:
+            formatted[-1].parts.append(types.Part.from_text(text="\n" + content_text))
+        else:
+            formatted.append(types.Content(role=role, parts=[types.Part.from_text(text=content_text)]))
+            last_role = role
 
     config_args: dict = {
         "temperature": 0.3,
@@ -153,7 +156,7 @@ async def call_llm(messages: list[dict], tools: list | None = None) -> tuple[str
         if gemini_tools:
             config_args["tools"] = gemini_tools
             config_args["tool_config"] = types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+                function_calling_config=types.FunctionCallingConfig(mode="AUTO")
             )
 
     config = types.GenerateContentConfig(**config_args)

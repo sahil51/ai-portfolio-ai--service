@@ -61,8 +61,40 @@ def _resolve_relative_date(s: str) -> str:
     return s
 
 
+def _normalize_hindi_datetime_text(s: str) -> str:
+    t = s.lower().strip()
+    t = _re.sub(r'\b(parso|parson|day\s*after\s*tomorrow)\b', 'dayaftertomorrow', t)
+    t = _re.sub(r'\b(kal|tom|aane\s+wala\s+kal)\b', 'tomorrow', t)
+    t = _re.sub(r'\b(aaj|today|tonight)\b', 'today', t)
+
+    is_pm = bool(_re.search(r'\b(sham|shaam|evening|raat|night|dopahar|dophar|pm)\b', t))
+    is_am = bool(_re.search(r'\b(subah|morning|am)\b', t))
+
+    t = _re.sub(r'\b(sham\s+ko|shaam\s+ko|sham|shaam|evening|raat\s+ko|raat|night|dopahar|dophar|afternoon|subah\s+ko|subah|morning)\b', '', t)
+
+    if is_pm:
+        t = _re.sub(r'(\d{1,2}(?::\d{2})?)\s*baje', r'\1 pm', t)
+        if not _re.search(r'\b(am|pm)\b', t):
+            t = _re.sub(r'(\d{1,2}(?::\d{2})?)', r'\1 pm', t, count=1)
+    elif is_am:
+        t = _re.sub(r'(\d{1,2}(?::\d{2})?)\s*baje', r'\1 am', t)
+        if not _re.search(r'\b(am|pm)\b', t):
+            t = _re.sub(r'(\d{1,2}(?::\d{2})?)', r'\1 am', t, count=1)
+    else:
+        def _default_baje(m):
+            hr = int(m.group(1).split(':')[0])
+            suffix = "pm" if 1 <= hr <= 6 else "am" if 8 <= hr <= 11 else ""
+            return f"{m.group(1)} {suffix}".strip()
+        t = _re.sub(r'(\d{1,2}(?::\d{2})?)\s*baje', _default_baje, t)
+
+    t = _re.sub(r'\bbaje\b', '', t)
+    t = _re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
 def _normalize_datetime_str(raw: str) -> str:
     s = raw.strip()
+    s = _normalize_hindi_datetime_text(s)
     s = _resolve_relative_date(s)
     s = _re.sub(r"\s+", " ", s)
     s = s.replace("at ", "").replace("on ", "")
@@ -234,71 +266,66 @@ def get_current_field_index(current: MeetingData, language: str = "english") -> 
 def _extract_clean_value(field_name: str, raw_msg: str) -> str:
     """
     Extract the actual value from a natural-language response.
-    e.g. "my name is Megha" → "Megha"
-         "company name is zzzy ltsd" → "zzzy ltsd"
-         "my contact number is 784512045" → "784512045"
-         "megha@gmail.com" → "megha@gmail.com"
+    Handles English, Hindi, and Hinglish prefixes and suffixes cleanly.
     """
     msg = raw_msg.strip()
 
     if field_name == "name":
-        # Strip common name prefixes
         prefixes = [
             r"(?i)^(?:my\s+)?(?:full\s+)?name\s+is\s+",
-            r"(?i)^(?:i\s+am|i'm|it'?s|this\s+is|mera\s+naam|naam)\s+",
+            r"(?i)^(?:i\s+am|i'm|it'?s|this\s+is|mera\s+naam|naam)\s+(?:hai\s+)?",
             r"(?i)^(?:main|mera\s+naam\s+hai|naam\s+hai)\s+",
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
-        # Title case the name
+        msg = _re.sub(r"(?i)\s+(?:hai|hoon|hu|bol\s+raha\s+hoon|bol\s+raha\s+hu|here|sir|ji)$", "", msg).strip()
         return msg.title() if msg else msg
 
     if field_name == "company_name":
         prefixes = [
-            r"(?i)^(?:my\s+)?company(?:\s+name)?\s+is\s+",
+            r"(?i)^(?:my\s+)?company(?:\s+name)?\s+(?:is\s+)?",
             r"(?i)^(?:i\s+work\s+(?:for|at|in)|main\s+kaam\s+karta?\s+hoon?)\s+",
             r"(?i)^(?:company\s+ka\s+naam(?:\s+hai)?)\s+",
             r"(?i)^(?:it'?s|it\s+is)\s+",
+            r"(?i)^from\s+",
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+(?:hai|ki\s+taraf\s+se|company\s+hai)$", "", msg).strip()
         return msg
 
     if field_name == "company_address":
         prefixes = [
-            r"(?i)^(?:my\s+)?(?:company\s+)?address\s+is\s+",
+            r"(?i)^(?:my\s+)?(?:company\s+)?address\s+(?:is\s+)?",
             r"(?i)^(?:it'?s\s+(?:at|in)|located\s+(?:at|in))\s+",
             r"(?i)^(?:company\s+ka\s+address(?:\s+hai)?)\s+",
             r"(?i)^(?:it'?s|it\s+is)\s+",
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+(?:hai|me\s+hai|mein\s+hai)$", "", msg).strip()
         return msg
 
     if field_name == "email":
-        # Try to extract email pattern from the text
         email_match = _re.search(
             r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', msg
         )
         if email_match:
             return email_match.group(0)
-        # Fallback: strip common prefixes
         prefixes = [
-            r"(?i)^(?:my\s+)?email(?:\s+id)?\s+is\s+",
+            r"(?i)^(?:my\s+)?email(?:\s+id)?\s+(?:is\s+)?",
             r"(?i)^(?:it'?s|it\s+is)\s+",
             r"(?i)^(?:meri\s+email(?:\s+id)?(?:\s+hai)?)\s+",
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+hai$", "", msg).strip()
         return msg
 
     if field_name == "contact_number":
-        # Extract phone digits from the sentence
-        # First try to find a phone-number-like pattern
         phone_match = _re.search(r'[\+]?[\d\s\-\(\)]{7,15}', msg)
         if phone_match:
             return phone_match.group(0).strip()
-        # Fallback: strip prefixes
         prefixes = [
             r"(?i)^(?:my\s+)?(?:contact\s+)?(?:number|phone|mobile)(?:\s+(?:is|number\s+is))?\s+",
             r"(?i)^(?:it'?s|it\s+is)\s+",
@@ -306,19 +333,163 @@ def _extract_clean_value(field_name: str, raw_msg: str) -> str:
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+hai$", "", msg).strip()
+        return msg
+
+    if field_name == "meeting_purpose":
+        prefixes = [
+            r"(?i)^(?:(?:meeting|interview)\s+)?purpose\s+(?:is\s+)?",
+            r"(?i)^(?:agenda\s+is|reason\s+is)\s+",
+            r"(?i)^(?:for\s+an?\s+interview|interview\s+ke\s+liye)\s*",
+        ]
+        for pat in prefixes:
+            msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+hai$", "", msg).strip()
         return msg
 
     if field_name == "meeting_date_time":
         prefixes = [
-            r"(?i)^(?:(?:meeting|preferred)\s+(?:date\s+(?:and\s+)?)?time\s+is\s+)",
+            r"(?i)^(?:(?:meeting|preferred)\s+(?:date\s+(?:and\s+)?)?time\s+(?:is\s+)?)",
             r"(?i)^(?:let'?s?\s+(?:do|meet|schedule)(?:\s+(?:it|on))?\s+)",
             r"(?i)^(?:it'?s|it\s+is|how\s+about)\s+",
         ]
         for pat in prefixes:
             msg = _re.sub(pat, "", msg).strip()
+        msg = _re.sub(r"(?i)\s+ko\s+milte\s+hain$", "", msg).strip()
+        msg = _re.sub(r"(?i)\s+hai$", "", msg).strip()
         return msg
 
     return msg
+
+
+def smart_multi_field_extractor(raw_msg: str) -> dict:
+    """
+    Precision multi-field extractor that parses multiple fields simultaneously from natural language.
+    Handles English, Hindi, and Hinglish.
+    """
+    extracted = {}
+    remaining = raw_msg.strip()
+
+    # 1. Email extraction (RFC compliant)
+    email_match = _re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', remaining)
+    if email_match and MeetingData.validate_email(email_match.group(0)):
+        extracted['email'] = email_match.group(0).strip()
+        remaining = remaining.replace(email_match.group(0), ' ')
+
+    # 2. Contact Number extraction
+    phone_match = _re.search(r'(\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', remaining)
+    if phone_match:
+        cand_phone = phone_match.group(0).strip()
+        if MeetingData.validate_phone(cand_phone):
+            extracted['contact_number'] = MeetingData.normalize_phone(cand_phone)
+            remaining = remaining.replace(phone_match.group(0), ' ')
+
+    # 3. Connection Type extraction
+    rem_lower = remaining.lower()
+    conn = MeetingData.validate_connection_type(rem_lower)
+    if conn:
+        extracted['connection_type'] = conn
+        remaining = _re.sub(r'(?i)\b(google\s*meet|gmeet|video\s*call|phone\s*call|online|offline|face\s*to\s*face|in\s*person)\b', ' ', remaining)
+
+    # 4. Date & Time extraction (Isolates exact date/time phrase so context does not bleed into date)
+    dt_regexes = [
+        # Relative day + time (e.g. 'kal sham 4 baje', 'tomorrow at 3pm', 'parso 10 am', 'kal 5 baje sham ko')
+        r'(?i)\b(?:aaj|kal|parso|parson|day\s+after\s+tomorrow|tomorrow|today|tonight)\s*(?:ko)?\s*(?:(?:subah|dopahar|dophar|sham|shaam|raat|morning|afternoon|evening|night)\s*(?:ko\s*)?)?(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm|baje)?(?:\s*(?:ko\s*)?(?:subah|dopahar|dophar|sham|shaam|raat|evening|morning))?\b',
+        # Time + relative day (e.g. '4 baje kal', '3pm tomorrow')
+        r'(?i)\b(?:(?:subah|dopahar|sham|shaam|raat|morning|evening)\s*(?:ko\s*)?)?\d{1,2}(?::\d{2})?\s*(?:am|pm|baje)?\s*(?:ko)?\s*(?:kal|parso|tomorrow|aaj|today)\b',
+        # Day of week + time (e.g. 'next monday at 11 am', 'somvar ko 4 baje')
+        r'(?i)\b(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|somvar|mangalvar|budhvar|guruvar|shukravar|shanivar|ravivar)\s*(?:ko)?\s*(?:at\s*)?(?:(?:subah|dopahar|sham|raat|morning|afternoon|evening)\s*(?:ko\s*)?)?\d{1,2}(?::\d{2})?\s*(?:am|pm|baje)?(?:\s*(?:ko\s*)?(?:subah|dopahar|dophar|sham|shaam|raat|evening|morning))?\b',
+        # Calendar date + time (e.g. '15 oct at 4pm', 'October 15 3:00 PM')
+        r'(?i)\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{4})?(?:\s*(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b',
+        r'(?i)\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{4})?(?:\s*(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b',
+        # ISO / standard date (e.g. '2026-10-15 14:00', '15/10/2026')
+        r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b',
+        # Time only with am/pm or baje
+        r'(?i)\b\d{1,2}(?::\d{2})?\s*(?:am|pm|baje)(?:\s*(?:ist|utc|gmt))?\b',
+        # Relative day only
+        r'(?i)\b(?:aaj|kal|parso|parson|day\s+after\s+tomorrow|tomorrow|tonight)\b',
+    ]
+    for dtr in dt_regexes:
+        dt_match = _re.search(dtr, remaining)
+        if dt_match:
+            cand_dt = dt_match.group(0).strip()
+            is_valid, dt_val, _ = validate_meeting_datetime(cand_dt)
+            if is_valid and dt_val:
+                extracted['meeting_date_time'] = dt_val
+                remaining = remaining.replace(dt_match.group(0), ' ')
+                break
+
+    # 5. Name extraction (e.g. 'Mera naam X hai', 'My name is X', 'I am X', 'This is X')
+    name_patterns = [
+        r'(?i)(?:my\s+name\s+is|mera\s+naam\s+hai|mera\s+naam|i\s+am|i\'m|this\s+is)\s+([A-Za-z\s]+?)(?:,|\.|\baur\b|\bcompany\b|\bemail\b|\bphone\b|\bfrom\b|\bhai\b|$)',
+    ]
+    for np in name_patterns:
+        nm = _re.search(np, remaining)
+        if nm:
+            cand_name = nm.group(1).strip()
+            cand_name = _re.sub(r'(?i)\b(hai|hoon|hu|here|sir|ji)\b', '', cand_name).strip()
+            if cand_name and 1 <= len(cand_name.split()) <= 4:
+                extracted['name'] = cand_name.title()
+                remaining = remaining.replace(nm.group(0), ' ')
+                break
+
+    # 6. Company Name extraction (e.g. 'Company is X', 'from X company', 'work at X')
+    comp_patterns = [
+        r'(?i)(?:company(?:\s+ka\s+naam)?(?:\s+name)?(?:\s+is|\s+hai)?|from\s+company|work\s+(?:at|for))\s+([A-Za-z0-9\s&.-]+?)(?:,|\.|\bemail\b|\bphone\b|\baddress\b|\bhai\b|$)',
+        r'(?i)\bfrom\s+([A-Za-z0-9\s&.-]+?)(?:\s+company|\s+technologies|\s+pvt|\s+ltd)?(?:,|\.|\bemail\b|\bphone\b|\bhai\b|$)',
+    ]
+    for cp in comp_patterns:
+        cm = _re.search(cp, remaining)
+        if cm:
+            cand_comp = cm.group(1).strip()
+            cand_comp = _re.sub(r'(?i)\b(hai|ki\s+taraf\s+se)\b', '', cand_comp).strip()
+            if cand_comp and 1 <= len(cand_comp.split()) <= 5:
+                extracted['company_name'] = cand_comp
+                remaining = remaining.replace(cm.group(0), ' ')
+                break
+
+    # 7. Meeting Purpose extraction (e.g. 'interview ke liye', 'for interview', 'regarding job')
+    purpose_patterns = [
+        r'(?i)(?:(?:meeting|interview)\s+)?(?:purpose(?:\s+is)?|agenda(?:\s+is)?|reason(?:\s+is)?)\s+([A-Za-z0-9\s&.-]+?)(?:,|\.|\bemail\b|\bphone\b|\bhai\b|$)',
+        r'(?i)\b(?:for\s+an?\s+|regarding\s+|for\s+)(interview|job|freelance|project|collaboration|hiring|discussion|meeting|consultation)\b',
+        r'(?i)\b(interview|job|freelance|project|collaboration|hiring|discussion|meeting|consultation)\s+ke\s+liye\b',
+    ]
+    for pp in purpose_patterns:
+        pm = _re.search(pp, remaining)
+        if pm:
+            cand_purp = pm.group(1).strip()
+            if cand_purp:
+                extracted['meeting_purpose'] = cand_purp.capitalize()
+                remaining = remaining.replace(pm.group(0), ' ')
+                break
+
+    # 8. Company Address extraction
+    addr_patterns = [
+        r'(?i)(?:(?:company\s+)?address(?:\s+is)?|located\s+(?:at|in))\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bemail\b|\bphone\b|\bhai\b|$)',
+        r'(?i)(?:address|location)\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bhai\b|$)',
+    ]
+    for ap in addr_patterns:
+        am = _re.search(ap, remaining)
+        if am:
+            cand_addr = am.group(1).strip()
+            if cand_addr:
+                extracted['company_address'] = cand_addr
+                break
+
+    # 9. Comma-separated list fallback (e.g. "Sahil Rajput, Google, sahil@google.com, 9876543210")
+    if 'name' not in extracted:
+        clean_rem = _re.sub(r'(?i)\b(hai|hoon|hu|milte|hain|rakh\s+lo|please|schedule|karna|kardo)\b', '', remaining).strip()
+        parts = [p.strip() for p in clean_rem.split(',') if p.strip()]
+        if parts:
+            first_p = parts[0]
+            if _re.match(r'^[A-Za-z\s]{2,35}$', first_p) and 1 <= len(first_p.split()) <= 4:
+                extracted['name'] = first_p.title()
+                if len(parts) > 1 and 'company_name' not in extracted:
+                    sec_p = parts[1]
+                    if _re.match(r'^[A-Za-z0-9\s&.-]{2,40}$', sec_p) and 1 <= len(sec_p.split()) <= 5:
+                        extracted['company_name'] = sec_p
+
+    return extracted
 
 
 def _validate_and_set_field(
@@ -363,7 +534,21 @@ def _validate_and_set_field(
         setattr(current, field_name, parsed)
         return True, ""
 
-    # For name, company_name, company_address, meeting_date_time
+    if field_name == "meeting_date_time":
+        is_valid, dt_val, err = validate_meeting_datetime(clean_value, language)
+        if not is_valid:
+            return False, err or get_meeting_validation_error("meeting_date_time", language)
+        setattr(current, field_name, dt_val or clean_value)
+        return True, ""
+
+    if field_name == "name":
+        # A name shouldn't contain emails or long digit sequences
+        if "@" in clean_value or _re.search(r'\d{5,}', clean_value):
+            return False, get_meeting_validation_error("name", language)
+        setattr(current, field_name, clean_value)
+        return True, ""
+
+    # For company_name, company_address, meeting_purpose
     setattr(current, field_name, clean_value)
     return True, ""
 
@@ -558,14 +743,33 @@ Resilience & 2000IQ Rules:
         except Exception as e:
             print(f"[Meeting Agent] LLM extraction failed/errored or timed out: {e}")
 
+        # 0. Smart multi-field extractor (zero-latency, regex & heuristic powered)
+        multi_extracted = smart_multi_field_extractor(latest_user_msg)
+        for mf, mv in multi_extracted.items():
+            if mv and not getattr(current, mf, None):
+                setattr(current, mf, mv)
+
         # Fallback / Direct rule-based extraction safety net:
-        # If LLM didn't extract the field or had a hiccup, rule-based extraction ensures
-        # user messages like "my name is Megha", email, phone, etc. are never dropped.
+        # If user answered the active field directly (e.g. single response)
         current_idx = get_current_field_index(current, language)
         if current_idx < len(fields):
             curr_field_name, _ = fields[current_idx]
             if getattr(current, curr_field_name, None) is None:
-                _validate_and_set_field(current, curr_field_name, latest_user_msg, language)
+                # Guard: Do not assign date or connection_type strings to name or company_name
+                if curr_field_name in ("name", "company_name") and ("meeting_date_time" in multi_extracted or "connection_type" in multi_extracted):
+                    pass
+                else:
+                    # If message contains email or phone, strip them so they don't get assigned as name or company!
+                    cleaned_single = latest_user_msg
+                    if current.email and current.email in cleaned_single:
+                        cleaned_single = cleaned_single.replace(current.email, " ")
+                    if current.contact_number and current.contact_number in cleaned_single:
+                        cleaned_single = cleaned_single.replace(current.contact_number, " ")
+                    # Strip out connection type words if current field is not connection_type
+                    if curr_field_name not in ("connection_type",):
+                        cleaned_single = _re.sub(r'(?i)\b(google\s*meet|gmeet|video\s*call|phone\s*call|online|offline)\b', ' ', cleaned_single)
+                    if cleaned_single.strip():
+                        _validate_and_set_field(current, curr_field_name, cleaned_single.strip(), language)
 
         # Standalone regex extraction for email and phone numbers anywhere in text
         if not current.email:
@@ -870,31 +1074,101 @@ def build_email_html(
 
 
 def _send_email_sync(subject: str, text_body: str, html_body: str, recipient_email: str):
-    """Synchronous helper to send HTML + Plain Text email via SMTP with IPv4 enforcement."""
+    """
+    Sends HTML + Plain Text email.
+    Supports HTTP API (Resend / Brevo) over HTTPS Port 443 (which Render never blocks)
+    with automatic fallback to SMTP.
+    """
+    from config import settings
+    import httpx
+
+    recip = recipient_email.strip()
+    if not recip:
+        return
+
+    # 1. Try Resend HTTP API (Port 443 - Works seamlessly on Render)
+    resend_key = (settings.RESEND_API_KEY or "").strip()
+    if resend_key:
+        try:
+            from_addr = (settings.DEFAULT_FROM_EMAIL or "").strip() or "onboarding@resend.dev"
+            # If using unverified domain / gmail, fallback to onboarding@resend.dev
+            if "@gmail.com" in from_addr.lower() or not from_addr:
+                from_addr = "Sahil Thakur <onboarding@resend.dev>"
+            resp = httpx.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": from_addr,
+                    "to": [recip],
+                    "subject": subject,
+                    "html": html_body,
+                    "text": text_body,
+                },
+                timeout=8.0,
+            )
+            if resp.status_code in (200, 201):
+                print(f"[Meeting Email Resend] Successfully sent HTML email to {recip}")
+                return
+            else:
+                print(f"[Meeting Email Resend] HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[Meeting Email Resend Exception]: {e}")
+
+    # 2. Try Brevo HTTP API (Port 443 - Works seamlessly on Render)
+    brevo_key = (settings.BREVO_API_KEY or "").strip()
+    if brevo_key:
+        try:
+            from_addr = (settings.DEFAULT_FROM_EMAIL or "").strip() or settings.EMAIL_HOST_USER.strip()
+            resp = httpx.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": brevo_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "sender": {"email": from_addr, "name": "Sahil Thakur"},
+                    "to": [{"email": recip}],
+                    "subject": subject,
+                    "htmlContent": html_body,
+                    "textContent": text_body,
+                },
+                timeout=8.0,
+            )
+            if resp.status_code in (200, 201):
+                print(f"[Meeting Email Brevo] Successfully sent HTML email to {recip}")
+                return
+            else:
+                print(f"[Meeting Email Brevo] HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[Meeting Email Brevo Exception]: {e}")
+
+    # 3. Standard SMTP Fallback (Works on Localhost and Paid instances; Render Free blocks port 587)
     import smtplib
     import socket
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    from config import settings
 
     user = settings.EMAIL_HOST_USER.strip()
     pwd = settings.EMAIL_HOST_PASSWORD.strip().replace(" ", "")
     from_email = settings.DEFAULT_FROM_EMAIL.strip() or user
 
-    if not user or not pwd or not recipient_email.strip():
-        print("[Meeting Agent Email] SMTP credentials or recipient missing, skipping email send.")
+    if not user or not pwd:
+        print("[Meeting Agent Email] SMTP credentials missing, skipping SMTP.")
         return
 
     msg = MIMEMultipart('alternative')
     msg['From'] = from_email
-    msg['To'] = recipient_email.strip()
+    msg['To'] = recip
     msg['Subject'] = subject
 
     msg.attach(MIMEText(text_body, 'plain'))
     if html_body:
         msg.attach(MIMEText(html_body, 'html'))
 
-    # Force IPv4 DNS resolution to prevent [Errno 101] Network is unreachable on Render/Linux containers
+    # Force IPv4 DNS resolution
     orig_getaddrinfo = socket.getaddrinfo
 
     def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
@@ -903,20 +1177,21 @@ def _send_email_sync(subject: str, text_body: str, html_body: str, recipient_ema
     socket.getaddrinfo = _ipv4_getaddrinfo
     try:
         if settings.EMAIL_USE_TLS:
-            server = smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=15)
+            server = smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=5)
             server.ehlo()
             server.starttls()
             server.ehlo()
         else:
-            server = smtplib.SMTP_SSL(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=15)
+            server = smtplib.SMTP_SSL(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=5)
             server.ehlo()
 
         server.login(user, pwd)
         server.send_message(msg)
         server.quit()
-        print(f"[Meeting Agent Email] Successfully sent HTML email to {recipient_email}")
+        print(f"[Meeting Agent Email SMTP] Successfully sent HTML email to {recip}")
     except Exception as e:
-        print(f"[Meeting Agent Email] Failed to send email to {recipient_email}: {e}")
+        print(f"[Meeting Agent Email SMTP Error]: {e}")
+        print("[Render Free Tier Warning] Outbound SMTP port 587 is blocked on Render Free tier. To enable emails on Render, set RESEND_API_KEY or BREVO_API_KEY in environment variables.")
     finally:
         socket.getaddrinfo = orig_getaddrinfo
 
