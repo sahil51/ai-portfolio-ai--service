@@ -27,8 +27,9 @@ _TZ_ABBR_MAP = {
 
 
 _RELATIVE_DAY = {
-    "today": 0, "tonight": 0, "tomorrow": 1, "tom": 1,
-    "dayaftertomorrow": 2, "nextday": 1,
+    "today": 0, "tonight": 0,
+    "tomorrow": 1, "tommorow": 1, "tomorow": 1, "tom": 1, "2moro": 1, "2morrow": 1,
+    "dayaftertomorrow": 2, "day after tomorrow": 2, "nextday": 1,
 }
 
 
@@ -64,7 +65,7 @@ def _resolve_relative_date(s: str) -> str:
 def _normalize_hindi_datetime_text(s: str) -> str:
     t = s.lower().strip()
     t = _re.sub(r'\b(parso|parson|day\s*after\s*tomorrow)\b', 'dayaftertomorrow', t)
-    t = _re.sub(r'\b(kal|tom|aane\s+wala\s+kal)\b', 'tomorrow', t)
+    t = _re.sub(r'\b(kal|tom|tommorow|tomorow|2moro|2morrow|aane\s+wala\s+kal)\b', 'tomorrow', t)
     t = _re.sub(r'\b(aaj|today|tonight)\b', 'today', t)
 
     is_pm = bool(_re.search(r'\b(sham|shaam|evening|raat|night|dopahar|dophar|pm)\b', t))
@@ -465,8 +466,8 @@ def smart_multi_field_extractor(raw_msg: str) -> dict:
 
     # 8. Company Address extraction
     addr_patterns = [
-        r'(?i)(?:(?:company\s+)?address(?:\s+is)?|located\s+(?:at|in))\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bemail\b|\bphone\b|\bhai\b|$)',
-        r'(?i)(?:address|location)\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bhai\b|$)',
+        r'(?i)(?:(?:comp(?:a|n)?y\s+)?a?ddress(?:\s+is|\s+hai)?|located\s+(?:at|in)|pata(?:\s+hai)?)\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bemail\b|\bphone\b|\bhai\b|$)',
+        r'(?i)(?:a?ddress|location|pata)\s+([A-Za-z0-9\s,.-]+?)(?:,|\.|\bhai\b|$)',
     ]
     for ap in addr_patterns:
         am = _re.search(ap, remaining)
@@ -548,7 +549,23 @@ def _validate_and_set_field(
         setattr(current, field_name, clean_value)
         return True, ""
 
-    # For company_name, company_address, meeting_purpose
+    if field_name == "company_name":
+        # Guard: If user provided an address, phone, email, or date, do NOT accept as company_name
+        if _re.search(r'(?i)\b(a?ddress|pata|nagar|sector|street|road|floor|colony|ambala|haryana|delhi|bangalore|mumbai|pune)\b', clean_value):
+            return False, ""
+        if "@" in clean_value or _re.search(r'\d{6,}', clean_value):
+            return False, ""
+        setattr(current, field_name, clean_value)
+        return True, ""
+
+    if field_name == "meeting_purpose":
+        # Guard: If user provided phone, email or address, do NOT accept as purpose
+        if "@" in clean_value or _re.search(r'\d{8,}', clean_value) or _re.search(r'(?i)\b(contact\s*number|phone|mobile)\b', clean_value):
+            return False, ""
+        setattr(current, field_name, clean_value)
+        return True, ""
+
+    # For company_address
     setattr(current, field_name, clean_value)
     return True, ""
 
@@ -743,33 +760,52 @@ Resilience & 2000IQ Rules:
         except Exception as e:
             print(f"[Meeting Agent] LLM extraction failed/errored or timed out: {e}")
 
+        # Check which field was actually requested before extracting from this turn
+        expected_idx_before = get_current_field_index(current, language)
+        expected_field_before = fields[expected_idx_before][0] if expected_idx_before < len(fields) else None
+
+        # Check if user is asking to edit/change a previously given detail (e.g. "i want to change my email")
+        user_lower = latest_user_msg.lower().strip()
+        is_change_request = any(w in user_lower for w in ["change", "edit", "badal", "modify", "update", "galat", "wrong"])
+        if is_change_request or user_lower.startswith("change ") or user_lower.startswith("edit "):
+            edit_target = resolve_edit_field(latest_user_msg)
+            if edit_target:
+                setattr(current, edit_target, None)
+                current.confirmation_pending = False
+                field_labels = get_meeting_labels(language)
+                lbl = field_labels.get(edit_target, edit_target)
+                msg_prompt = (
+                    f"Theek hai, chaliye apna {lbl} update karte hain. Kripya apna naya {lbl} batayein:"
+                    if language == "hindi" else
+                    f"Sure, let's update your {lbl}. Please provide your new {lbl}:"
+                )
+                progress = _build_progress(current, language)
+                return msg_prompt, current, progress
+
         # 0. Smart multi-field extractor (zero-latency, regex & heuristic powered)
         multi_extracted = smart_multi_field_extractor(latest_user_msg)
         for mf, mv in multi_extracted.items():
-            if mv and not getattr(current, mf, None):
+            if mv and getattr(current, mf, None) is None:
                 setattr(current, mf, mv)
 
         # Fallback / Direct rule-based extraction safety net:
-        # If user answered the active field directly (e.g. single response)
-        current_idx = get_current_field_index(current, language)
-        if current_idx < len(fields):
-            curr_field_name, _ = fields[current_idx]
-            if getattr(current, curr_field_name, None) is None:
-                # Guard: Do not assign date or connection_type strings to name or company_name
-                if curr_field_name in ("name", "company_name") and ("meeting_date_time" in multi_extracted or "connection_type" in multi_extracted):
-                    pass
-                else:
-                    # If message contains email or phone, strip them so they don't get assigned as name or company!
-                    cleaned_single = latest_user_msg
-                    if current.email and current.email in cleaned_single:
-                        cleaned_single = cleaned_single.replace(current.email, " ")
-                    if current.contact_number and current.contact_number in cleaned_single:
-                        cleaned_single = cleaned_single.replace(current.contact_number, " ")
-                    # Strip out connection type words if current field is not connection_type
-                    if curr_field_name not in ("connection_type",):
-                        cleaned_single = _re.sub(r'(?i)\b(google\s*meet|gmeet|video\s*call|phone\s*call|online|offline)\b', ' ', cleaned_single)
-                    if cleaned_single.strip():
-                        _validate_and_set_field(current, curr_field_name, cleaned_single.strip(), language)
+        # Only answer the field that was ACTIVE BEFORE this message arrived!
+        if expected_field_before and getattr(current, expected_field_before, None) is None:
+            # Guard: Do not assign date or connection_type strings to name or company_name
+            if expected_field_before in ("name", "company_name") and ("meeting_date_time" in multi_extracted or "connection_type" in multi_extracted):
+                pass
+            else:
+                # If message contains email or phone, strip them so they don't get assigned as name or company!
+                cleaned_single = latest_user_msg
+                if current.email and current.email in cleaned_single:
+                    cleaned_single = cleaned_single.replace(current.email, " ")
+                if current.contact_number and current.contact_number in cleaned_single:
+                    cleaned_single = cleaned_single.replace(current.contact_number, " ")
+                # Strip out connection type words if current field is not connection_type
+                if expected_field_before not in ("connection_type",):
+                    cleaned_single = _re.sub(r'(?i)\b(google\s*meet|gmeet|video\s*call|phone\s*call|online|offline)\b', ' ', cleaned_single)
+                if cleaned_single.strip():
+                    _validate_and_set_field(current, expected_field_before, cleaned_single.strip(), language)
 
         # Standalone regex extraction for email and phone numbers anywhere in text
         if not current.email:
@@ -799,14 +835,14 @@ Resilience & 2000IQ Rules:
         progress = _build_progress(current, language)
         return summary, current, progress
 
-    # 3. Not complete — P2 Fix: use static next question (no 2nd LLM call → ~50% lower latency)
-    prefix = get_meeting_collected_prefix(language)
+    # 3. Not complete — static next question with cleanly formatted collected summary
+    prefix = get_meeting_collected_prefix(language).strip()
     collected_lines = []
     for fn, label in labels.items():
         val = getattr(current, fn, None)
         if val:
             val_display = format_datetime_display(val) if fn == "meeting_date_time" else val
-            collected_lines.append(f"{label}: {val_display}")
+            collected_lines.append(f"• {label}: {val_display}")
 
     collected_header = f"{prefix}\n" + "\n".join(collected_lines) + "\n\n" if collected_lines else ""
 
@@ -884,6 +920,8 @@ def parse_n8n_response(data) -> tuple[bool, str, str]:
 async def send_to_n8n(meeting: MeetingData, session_id: str = "") -> tuple[bool, str, str]:
     """
     Triggers n8n meeting creation webhook.
+    Uses curl_cffi with Chrome TLS impersonation to bypass Cloudflare Bot Management / WAF challenges seamlessly.
+    Falls back to httpx if curl_cffi is unavailable.
     Returns tuple: (is_ok, link_or_code, msg_or_reason)
     """
     iso_dt_n8n = format_n8n_iso_datetime(meeting.meeting_date_time)
@@ -906,32 +944,44 @@ async def send_to_n8n(meeting: MeetingData, session_id: str = "") -> tuple[bool,
         print("[n8n Webhook] Error: N8N_MEETING_WEBHOOK_URL is not set.")
         return False, "ERROR", "n8n webhook URL not configured"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-    }
-
     print(f"\n[n8n Webhook] Triggering webhook: {webhook_url}")
     print(f"[n8n Webhook] Payload: {payload}")
 
     last_error = ""
     for attempt in range(3):
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(webhook_url, json=payload, headers=headers)
-                print(f"[n8n Webhook] Attempt {attempt + 1} response status: {resp.status_code}")
-                if resp.status_code in (200, 201, 202):
-                    try:
-                        data = resp.json()
-                        print(f"[n8n Webhook] Response data: {data}")
-                        return parse_n8n_response(data)
-                    except Exception as json_err:
-                        print(f"[n8n Webhook] Response JSON parsing error: {json_err}. Raw text: {resp.text[:300]}")
-                        return True, "", ""
-                
-                last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
-                print(f"[n8n Webhook] Attempt {attempt + 1} failed: {last_error}")
+            # 1. Primary: Use curl_cffi for authentic Chrome TLS handshake (bypasses Cloudflare 403)
+            try:
+                from curl_cffi.requests import AsyncSession
+                async with AsyncSession(impersonate="chrome124", timeout=20.0) as session:
+                    resp = await session.post(webhook_url, json=payload)
+                    print(f"[n8n Webhook curl_cffi] Attempt {attempt + 1} response status: {resp.status_code}")
+                    if resp.status_code in (200, 201, 202):
+                        try:
+                            data = resp.json()
+                            print(f"[n8n Webhook] Response data: {data}")
+                            return parse_n8n_response(data)
+                        except Exception as json_err:
+                            print(f"[n8n Webhook] Response JSON parsing error: {json_err}. Raw text: {resp.text[:300]}")
+                            return True, "", ""
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                    print(f"[n8n Webhook curl_cffi] Attempt {attempt + 1} failed: {last_error}")
+            except ImportError:
+                # 2. Fallback: Standard httpx
+                headers = {"Content-Type": "application/json", "Accept": "application/json"}
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.post(webhook_url, json=payload, headers=headers)
+                    print(f"[n8n Webhook httpx] Attempt {attempt + 1} response status: {resp.status_code}")
+                    if resp.status_code in (200, 201, 202):
+                        try:
+                            data = resp.json()
+                            print(f"[n8n Webhook] Response data: {data}")
+                            return parse_n8n_response(data)
+                        except Exception as json_err:
+                            print(f"[n8n Webhook] Response JSON parsing error: {json_err}. Raw text: {resp.text[:300]}")
+                            return True, "", ""
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                    print(f"[n8n Webhook httpx] Attempt {attempt + 1} failed: {last_error}")
         except Exception as e:
             last_error = str(e)[:300]
             print(f"[n8n Webhook] Attempt {attempt + 1} exception: {last_error}")
